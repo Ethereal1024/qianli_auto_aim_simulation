@@ -1,0 +1,23 @@
+[project]
+name = "qianli-auto-aim-simulation"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "matplotlib>=3.11.2",
+    "numpy>=2.4.6",
+    "pyyaml>=6.0.3",
+    "scipy>=1.17.1",
+    "tensorboard>=2.21.0",
+    "torch>=2.14.1",
+    "tqdm>=4.66.5",
+]
+
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cpu"
