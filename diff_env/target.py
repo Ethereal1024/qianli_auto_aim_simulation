@@ -60,13 +60,13 @@ class BodyMotion(nn.Module):
                 2 * math.pi * yaw_freq.unsqueeze(1) * t
             )
 
-        pitch = pitch_0.unsqueeze(1)
+        pitch = pitch_0.unsqueeze(1).expand(-1, sln)
         if pitch_amp.abs().sum() > 0:
             pitch = pitch + pitch_amp.unsqueeze(1) * torch.sin(
                 2 * math.pi * pitch_freq.unsqueeze(1) * t
             )
 
-        roll = roll_0.unsqueeze(1)
+        roll = roll_0.unsqueeze(1).expand(-1, sln)
         if roll_amp.abs().sum() > 0:
             roll = roll + roll_amp.unsqueeze(1) * torch.sin(
                 2 * math.pi * roll_freq.unsqueeze(1) * t
@@ -87,8 +87,9 @@ class ArmorLayout(nn.Module):
         self,
         n_armors: int,
         radius: torch.Tensor,
-        radius_offsets: torch.Tensor = None,
-        height_offsets: torch.Tensor = None,
+        radius_offsets: torch.Tensor | None = None,
+        height_offsets: torch.Tensor | None = None,
+        roll: float = math.pi * 5 / 12,
     ):
         device = radius.device
         bsz = radius.shape[0]
@@ -109,14 +110,18 @@ class ArmorLayout(nn.Module):
             / n_armors
         )
 
-        local_x = radius.unsqueeze(-1) * torch.cos(theta)
-        local_y = radius.unsqueeze(-1) * torch.sin(theta)
+        r_eff = radius.unsqueeze(-1) + radius_offsets
+        local_x = r_eff * torch.cos(theta)
+        local_y = r_eff * torch.sin(theta)
         local_z = height_offsets
         local_positions = torch.stack([local_x, local_y, local_z], dim=-1)
 
-        yaws = theta.unsqueeze(0)
+        yaws = theta.unsqueeze(0).expand(bsz, -1)
+        # vertical armor: width tangential, height up, normal radial outward
         zeros = torch.zeros_like(yaws)
-        local_rotations = euler_to_rotmat(yaws, zeros, zeros)
+        rolls = torch.full_like(yaws, roll)
+        half_pi = torch.full_like(yaws, math.pi / 2)
+        local_rotations = euler_to_rotmat(yaws + half_pi, zeros, rolls)
 
         w2 = self.armor_width / 2
         h2 = self.armor_height / 2
@@ -135,13 +140,13 @@ class ArmorLayout(nn.Module):
 
 
 class TargetMotion(nn.Module):
-    def __init__(self, armor_width: float = 0.02, armor_height: float = 0.06):
+    def __init__(self, armor_width: float = 0.12, armor_height: float = 0.06):
         super().__init__()
         self.body_motion = BodyMotion()
         self.armor_layout = ArmorLayout(armor_width, armor_height)
 
     def forward(self, t, mode="static", **params):
-        bsz, sln = t.shape
+        bsz, _ = t.shape
         device = t.device
 
         if mode in ("static", "constant_velocity"):
@@ -162,10 +167,26 @@ class TargetMotion(nn.Module):
         body_pos = body["positions"]
         body_rot = body["rotations"]
 
-        local_pos, local_rot, corners_local = self.armer_layout(
+        local_pos, local_rot, corners_local = self.armor_layout(
             n_armors, radius, radius_offsets, height_offsets
         )
 
         centers = body_pos.unsqueeze(2) + torch.einsum(
-            "btij,bnj->btni", body_rot, local_pos
+            "btij,bmj->btmi", body_rot, local_pos
         )
+        world_rot = torch.einsum("btik,bmkj->btmij", body_rot, local_rot)
+        corners = centers.unsqueeze(-2) + torch.einsum(
+            "btmij,cj->btmci", world_rot, corners_local
+        )
+        # facing direction of each plate: local +Z is the plate normal
+        normal_local = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=radius.dtype)
+        world_normal = torch.einsum("btmij,j->btmi", world_rot, normal_local)
+        armor_yaws = torch.atan2(world_normal[..., 1], world_normal[..., 0])
+
+        return {
+            "corners": corners,
+            "centers": centers,
+            "armor_yaws": armor_yaws,
+            "armor_rotations": world_rot,
+            "body_rotations": body_rot,
+        }
