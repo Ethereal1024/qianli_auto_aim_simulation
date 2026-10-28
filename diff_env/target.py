@@ -22,13 +22,11 @@ class BodyMotion(nn.Module):
         t_e = t.unsqueeze(-1)
 
         p0 = _get("p0", (bsz, 3))
-        v = _get("v", (bsz, 3))
-        a = _get("a", (bsz, 3))
         sinus_amp = _get("sinus_amp", (bsz, 3))
         sinus_freq = _get("sinus_freq", (bsz, 3))
         rw_sigma = _get("rw_sigma", (bsz, 3))
 
-        pos = p0.unsqueeze(1) + v.unsqueeze(1) * t_e + 0.5 * a.unsqueeze(1) * t_e**2
+        pos = p0.unsqueeze(1).expand(-1, sln, -1)
 
         if sinus_amp.abs().sum() > 0:
             pos = pos + sinus_amp.unsqueeze(1) * torch.sin(
@@ -43,8 +41,8 @@ class BodyMotion(nn.Module):
 
         yaw_0 = _get("yaw_0", (bsz,))
         yaw_rate = _get("yaw_rate", (bsz,))
-        yaw_amp = _get("yaw_amp", (bsz,))
-        yaw_freq = _get("yaw_freq", (bsz,))
+        yaw_rate_amp = _get("yaw_rate_amp", (bsz,))
+        yaw_rate_freq = _get("yaw_rate_freq", (bsz,))
 
         pitch_0 = _get("pitch_0", (bsz,))
         pitch_amp = _get("pitch_amp", (bsz,))
@@ -55,9 +53,11 @@ class BodyMotion(nn.Module):
         roll_freq = _get("roll_freq", (bsz,))
 
         yaw = yaw_0.unsqueeze(1) + yaw_rate.unsqueeze(1) * t
-        if yaw_amp.abs().sum() > 0:
-            yaw = yaw + yaw_amp.unsqueeze(1) * torch.sin(
-                2 * math.pi * yaw_freq.unsqueeze(1) * t
+        if yaw_rate_amp.abs().sum() > 0:
+            amp = yaw_rate_amp.unsqueeze(1)
+            freq = yaw_rate_freq.unsqueeze(1)
+            yaw = yaw + amp / (2 * math.pi * freq) * (
+                1 - torch.cos(2 * math.pi * freq * t)
             )
 
         pitch = pitch_0.unsqueeze(1).expand(-1, sln)
@@ -188,5 +188,6 @@ class TargetMotion(nn.Module):
             "centers": centers,
             "armor_yaws": armor_yaws,
             "armor_rotations": world_rot,
+            "body_positions": body_pos,
             "body_rotations": body_rot,
         }
