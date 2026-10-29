@@ -26,22 +26,6 @@ from mpl_toolkits.mplot3d.art3d import Line3D, Text3D
 
 from diff_env.target import TargetMotion
 
-# ------------------------------------------------------------------- scene ---
-DISTANCE = 3.0                    # m, target straight ahead of the camera
-HEIGHT = 0.5                      # m, target and camera height
-RADIUS = 0.3                      # m, armor ring radius
-YAW = 0.0                         # deg, target heading at t = 0
-YAW_RATE = 5.0
-CAM_YAW = 0.0                     # deg, positive looks left
-FX = 800.0                        # px, focal length
-IMAGE_W, IMAGE_H = 1280, 1024     # px, image size
-SECONDS = 100.0                    # s, clip length
-FPS = 60.0                        # frame slots per second of clip time
-
-ARMOR_COLORS = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd")    # A0, A1, A2, A3
-AXIS_COLORS = ("#d62728", "#2ca02c", "#1f77b4")                # x, y, z
-N_ARMORS = len(ARMOR_COLORS)
-
 
 def camera_rotation(yaw_deg):
     """world -> camera rotation; positive yaw looks left."""
@@ -100,7 +84,23 @@ def place(frame, origin, rot):
     for line, end in zip(lines, origin + length * rot.T):
         line.set_data_3d(*np.vstack([origin, end]).T)
     label.set_position_3d(origin)
+    
+    
+# ------------------------------------------------------------------- scene ---
+DISTANCE = 3.0                    # m, target straight ahead of the camera
+HEIGHT = 0.5                      # m, target and camera height
+RADIUS = 0.3                      # m, armor ring radius
+YAW = 0.0                         # deg, target heading at t = 0
+YAW_RATE = 5.0
+CAM_YAW = 0.0                     # deg, positive looks left
+FX = 800.0                        # px, focal length
+IMAGE_W, IMAGE_H = 1280, 1024     # px, image size
+SECONDS = 1000.0                    # s, clip length
+FPS = 60.0                        # frame slots per second of clip time
 
+ARMOR_COLORS = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd")    # A0, A1, A2, A3
+AXIS_COLORS = ("#d62728", "#2ca02c", "#1f77b4")                # x, y, z
+N_ARMORS = len(ARMOR_COLORS)
 
 # ---------------------------------------------------------------- geometry ---
 CAM_POS = np.array([0.0, 0.0, HEIGHT])
@@ -108,18 +108,22 @@ BODY_POS = np.array([DISTANCE, 0.0, HEIGHT])
 R_WC = camera_rotation(CAM_YAW)
 N_FRAMES = max(2, round(SECONDS * FPS))
 
+
+
 track = TargetMotion()(
     torch.linspace(0.0, SECONDS, N_FRAMES).unsqueeze(0),
     "complex",
     p0=torch.tensor([[DISTANCE, 0.0, HEIGHT]]),
     yaw_0=torch.tensor([math.radians(YAW)]),
-    yaw_rate=torch.tensor([YAW_RATE]),
-    yaw_rate_amp=torch.tensor([0.5]),
-    yaw_rate_freq=torch.tensor([0.3]),
+    yaw_rate=YAW_RATE,
+    yaw_rate_amp=0.5,
+    yaw_rate_freq=0.3,
     n_armors=N_ARMORS,
-    radius=torch.tensor([RADIUS]),
-    # sinus_amp=torch.tensor([[0.2, 0.2, 0.2]]),   # 上下左右摆动
-    # sinus_freq=torch.tensor([[0.2, 0.5, 0.3]]),
+    radius=RADIUS,
+    sinus_amp=torch.tensor([[0.5, 0.3, 0.2]]),   # 上下左右摆动
+    sinus_freq=torch.tensor([[0.2, 0.5, 0.3]]),
+    pitch_amp=0.2,
+    pitch_freq=0.5
 )
 corners = track["corners"][0].numpy()              # (frames, armors, 4, 3)
 centers = track["centers"][0].numpy()
