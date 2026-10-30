@@ -1,5 +1,6 @@
 import torch
-import torch.nn as nn
+from torch import nn
+
 
 class Ballistic(nn.Module):
     def __init__(self, bullet_speed: float = 25.0, gravity: float = 9.81):
@@ -12,7 +13,7 @@ class Ballistic(nn.Module):
         yaw: torch.Tensor,
         pitch: torch.Tensor,
         target_pos: torch.Tensor,
-        muzzel_pos: torch.Tensor = None,
+        muzzel_pos: torch.Tensor | None = None,
         iters: int = 5
     ):
         bsz = yaw.shape[0]
@@ -47,3 +48,5 @@ class Ballistic(nn.Module):
             
         hit_pos = muzzel_pos + v0 * t.unsqueeze(-1) + 0.5 * g * (t.unsqueeze(-1) ** 2)
         hit_dist = torch.norm(hit_pos)
+        
+        return hit_pos, t, hit_dist

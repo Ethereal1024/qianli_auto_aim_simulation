@@ -8,14 +8,12 @@ class Camera(nn.Module):
     def forward(
         self,
         points_gimbal: torch.Tensor,
-        rvec_cg: torch.Tensor,
+        r_cg: torch.Tensor,
         t_cg: torch.Tensor,
         eps: float = 1e-6,
-    ):
-        R_cg = rvec_to_rotmat(rvec_cg)
-        
+    ):        
         delta = points_gimbal - t_cg.unsqueeze(-2)
-        points_cam = delta @ R_cg.mT
+        points_cam = delta @ r_cg.mT
         
         valid = points_cam[..., 2] > eps
         
