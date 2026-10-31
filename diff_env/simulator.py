@@ -73,6 +73,41 @@ class DiffSimulator(nn.Module):
         r_wg = euler_to_rotmat(yaw, -pitch, zeros)
         return torch.einsum("bij,bnj->bni", r_wg, points_gimbal)
 
+    def _mask_state(
+        self, 
+        old_state: torch.Tensor | list | tuple, 
+        new_state: torch.Tensor | list | tuple, 
+        mask: torch.Tensor
+    ):
+        if old_state is None:
+            return new_state
+        if isinstance(new_state, torch.Tensor) and isinstance(old_state, torch.Tensor):
+            view_shape = (-1,) + (1,) * (new_state.dim() - 1)
+            return torch.where(mask.view(*view_shape), new_state, old_state)
+        if isinstance(new_state, (tuple, list)) and isinstance(old_state, (tuple, list)):
+            return type(new_state)(
+                self._mask_state(o, n, mask) for o, n in zip(old_state, new_state)
+            )
+        return new_state
+    
+    def _policy_step(
+        self, 
+        policy: nn.Module,
+        kp: torch.Tensor, 
+        gimbal_rate: float, 
+        dt: float,
+        state: torch.Tensor | list | tuple, 
+        mask: torch.Tensor
+    ):
+        if not mask.any():
+            zero = torch.zeros(kp.shape[0], 1, device=kp.device, dtype=kp.dtype)
+            return zero, zero, state
+        yr, pr, state_new = policy(kp, gimbal_rate, dt, state)
+        yr = torch.where(mask.unsqueeze(-1), yr, torch.zeros_like(yr))
+        pr = torch.where(mask.unsqueeze(-1), pr, torch.zeros_like(pr))
+        state = self._mask_state(state, state_new, mask)
+        return yr, pr, state
+
     def forward(
         self,
         t: torch.Tensor,
@@ -140,9 +175,8 @@ class DiffSimulator(nn.Module):
                 vis = armor_valid[b].nonzero(as_tuple=True)[0]
                 if len(vis) == 0:
                     continue
-                selected = vis[
-                    :2
-                ]  # TODO: Currently we don't know if these two armors are literally visible ones.
+                selected = vis[:2]
+                # TODO: Currently we don't know if these two armors are literally visible ones.
 
                 yr_list, pr_list = [], []
                 for i, m in enumerate(selected):
@@ -169,27 +203,27 @@ class DiffSimulator(nn.Module):
                     torch.zeros_like(yaw),
                     torch.zeros_like(yaw),
                 ],
-                dim=-1
+                dim=-1,
             )
             muzzle_world = self._gimbal_to_world(
                 muzzle_local.unsqueeze(1), yaw, pitch
             ).squeeze(1)
-            
+
             target_pos = ctr_w[:, 0]
             hit_pos, t_fly, hit_dist = self.ballistic(
                 yaw, pitch, target_pos, muzzle_pos=muzzle_world
             )
-            
+
             logs["keypoints"].append(kp)
             logs["valid"].append(armor_valid)
-            logs['gimbal_yaw'].append(yaw)
+            logs["gimbal_yaw"].append(yaw)
             logs["gimbal_pitch"].append(pitch)
             logs["yaw_rate_cmd"].append(yaw_cmds)
             logs["pitch_rate_cmd"].append(pitch_cmds)
             logs["hit_dist"].append(hit_dist)
             logs["t_fly"].append(t_fly)
-            
+
         for key, _ in logs.values():
             logs[key] = torch.stack(logs[key], dim=1)
-            
+
         return logs
