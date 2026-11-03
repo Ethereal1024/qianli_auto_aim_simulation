@@ -35,14 +35,6 @@ def camera_rotation(yaw_deg):
     return base @ np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
 
 
-def project(points):
-    """world points [..., 3] -> pixel u, v."""
-    cam = (points - CAM_POS) @ R_WC.T
-    u = FX * cam[..., 0] / cam[..., 2] + IMAGE_W / 2
-    v = FX * cam[..., 1] / cam[..., 2] + IMAGE_H / 2
-    return u, v
-
-
 def closed(points):
     """repeat the first point, so a polygon line ends where it starts."""
     return np.vstack([points, points[:1]])
@@ -161,15 +153,6 @@ cubes = np.vstack([corners.reshape(-1, 3), CAM_POS, np.zeros(3)])
 set_cube(ax_world, cubes, 0.1)
 set_cube(ax_armor, np.vstack([corners.reshape(-1, 3), BODY_POS]), 0.15)
 
-px_per_m = FX / DISTANCE                       # fixed zoom, no autozoom
-half = (RADIUS + 0.25) * px_per_m              # radius plus a margin, in px
-# ax_image.set_xlim(IMAGE_W / 2 - half, IMAGE_W / 2 + half)
-# ax_image.set_ylim(IMAGE_H / 2 + half, IMAGE_H / 2 - half)   # v points down
-ax_image.set_xlim(0, IMAGE_W)
-ax_image.set_ylim(IMAGE_H, 0)   # v points down
-ax_image.set_aspect("equal")
-ax_image.grid(alpha=0.3)
-ax_image.set_autoscale_on(False)
 
 for ax in (ax_world, ax_armor):
     ax.set_xlabel("X fwd (m)")
@@ -177,8 +160,6 @@ for ax in (ax_world, ax_armor):
     ax.set_zlabel("Z up (m)")
 ax_world.set_title("world, camera and body frames")
 ax_armor.set_title("armor frames")
-ax_image.set_title(f"camera view at {DISTANCE:.1f} m "
-                   f"({IMAGE_W}x{IMAGE_H}, {px_per_m:.0f} px/m)")
 fig.suptitle("W world, C camera, B body, A# armor;  x red, y green, z blue",
              fontsize=9)
 
