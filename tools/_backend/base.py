@@ -1,0 +1,43 @@
+from abc import ABC, abstractmethod
+from typing import Any
+
+
+class ArrayBackend(ABC):
+    name: str
+
+    # creation
+    @abstractmethod
+    def zeros_like(self, x) -> Any: ...
+    @abstractmethod
+    def ones_like(self, x) -> Any: ...
+    @abstractmethod
+    def zeros(self, shape, *, dlike) -> Any: ...
+    @abstractmethod
+    def eye(self, n, *, dlike) -> Any: ...
+
+    # elementwise
+    @abstractmethod
+    def cos(self, x) -> Any: ...
+    @abstractmethod
+    def sin(self, x) -> Any: ...
+    @abstractmethod
+    def sqrt(self, x) -> Any: ...
+    @abstractmethod
+    def atan2(self, y, x) -> Any: ...
+    @abstractmethod
+    def maximum(self, x, y) -> Any: ...
+    
+    # reductions
+    @abstractmethod
+    def sum(self, x, *, axis, keepdims=False) -> Any: ...
+    
+    def norm(self, x, *, axis, keepdims=False) -> Any:
+        return self.sqrt(self.sum(x * x, axis=axis, keepdims=keepdims))
+    
+    # manipulation
+    @abstractmethod
+    def stack(self, seq, *, axis) -> Any: ...
+    @abstractmethod
+    def broadcast_to(self, x, shape) -> Any: ...
+    @abstractmethod
+    def transpose(self, x) -> Any: ...

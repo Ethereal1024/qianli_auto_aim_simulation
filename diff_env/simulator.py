@@ -1,8 +1,10 @@
+from __future__ import annotations
+
+from abc import ABC, abstractmethod
 from typing import Any
 
 import torch
 from torch import nn
-
 
 from diff_env.ballistic import Ballistic
 from diff_env.camera import Camera
@@ -13,16 +15,37 @@ from diff_env.target import TargetMotion
 R_CG_DEFAULT = torch.tensor([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 
 
-class SimpleProportionalPolicy(nn.Module):
+class AutoAimPolicy(nn.Module, ABC):
+    def __init__(self):
+        super().__init__()
+
+    @abstractmethod
+    def init_state(self, bsz: int, device: torch.device, dtype: torch.dtype) -> Any: ...
+
+    @abstractmethod
+    def forward(
+        self,
+        keypoints: torch.Tensor,
+        gimbal_rate: torch.Tensor,
+        dt: torch.Tensor,
+        state=None,
+    ) -> Any: ...
+
+
+class SimpleProportionalPolicy(AutoAimPolicy):
     def __init__(self, gain: float = 10.0):
         super().__init__()
         self.gain = gain
+
+    def init_state(self, bsz: int, device: torch.device, dtype: torch.dtype):
+        return None
 
     def forward(
         self,
         keypoints: torch.Tensor,
         gimbal_rate: torch.Tensor,
         dt: torch.Tensor,
+        state=None,
     ):
         cx = keypoints[..., 0::2].mean(-1, keepdim=True)
         cy = keypoints[..., 1::2].mean(-1, keepdim=True)
@@ -74,30 +97,32 @@ class DiffSimulator(nn.Module):
         return torch.einsum("bij,bnj->bni", r_wg, points_gimbal)
 
     def _mask_state(
-        self, 
-        old_state: torch.Tensor | list | tuple, 
-        new_state: torch.Tensor | list | tuple, 
-        mask: torch.Tensor
+        self,
+        old_state: torch.Tensor | list | tuple,
+        new_state: torch.Tensor | list | tuple,
+        mask: torch.Tensor,
     ):
         if old_state is None:
             return new_state
         if isinstance(new_state, torch.Tensor) and isinstance(old_state, torch.Tensor):
             view_shape = (-1,) + (1,) * (new_state.dim() - 1)
             return torch.where(mask.view(*view_shape), new_state, old_state)
-        if isinstance(new_state, (tuple, list)) and isinstance(old_state, (tuple, list)):
+        if isinstance(new_state, (tuple, list)) and isinstance(
+            old_state, (tuple, list)
+        ):
             return type(new_state)(
                 self._mask_state(o, n, mask) for o, n in zip(old_state, new_state)
             )
         return new_state
-    
+
     def _policy_step(
-        self, 
-        policy: nn.Module,
-        kp: torch.Tensor, 
-        gimbal_rate: float, 
+        self,
+        policy: AutoAimPolicy,
+        kp: torch.Tensor,
+        gimbal_rate: float,
         dt: float,
-        state: torch.Tensor | list | tuple, 
-        mask: torch.Tensor
+        state: torch.Tensor | list | tuple,
+        mask: torch.Tensor,
     ):
         if not mask.any():
             zero = torch.zeros(kp.shape[0], 1, device=kp.device, dtype=kp.dtype)
@@ -114,7 +139,7 @@ class DiffSimulator(nn.Module):
         target_params: dict,
         init_yaw: torch.Tensor,
         init_pitch: torch.Tensor,
-        policy: nn.Module | None = None,
+        policy: AutoAimPolicy,
     ):
         if policy is None:
             policy = SimpleProportionalPolicy()
@@ -139,6 +164,8 @@ class DiffSimulator(nn.Module):
         yaw_rate = torch.zeros(bsz, device=device, dtype=dtype)
         pitch_rate = torch.zeros(bsz, device=device, dtype=dtype)
 
+        state = policy.init_state(bsz, device, dtype)
+
         logs: dict = {
             "keypoints": [],
             "valid": [],
@@ -151,6 +178,8 @@ class DiffSimulator(nn.Module):
         }
 
         r_cg = self.r_cg.unsqueeze(0).expand(bsz, -1, -1)
+        arange_bsz = torch.arange(bsz, device=device)
+        idx = torch.arange(sql, device=device)
 
         for k in range(t):
             cnr_w = corners_world[:, k]
@@ -164,54 +193,12 @@ class DiffSimulator(nn.Module):
             kp, valid = self.camera(cg.reshape(bsz, n_armors * 4, 3), r_cg)
             kp = kp.reshape(bsz, n_armors, 4, 2)
             valid = valid.reshape(bsz, n_armors, 4)
-
             armor_valid = valid.all(dim=-1)
 
-            dt_k = dt[:, k]
-            yaw_cmds = torch.zeros(bsz, device=device, dtype=dtype)
-            pitch_cmds = torch.zeros(bsz, device=device, dtype=dtype)
-
-            for b in range(bsz):
-                vis = armor_valid[b].nonzero(as_tuple=True)[0]
-                if len(vis) == 0:
-                    continue
-                selected = vis[:2]
-                # TODO: Currently we don't know if these two armors are literally visible ones.
-
-                yr_list, pr_list = [], []
-                for i, m in enumerate(selected):
-                    kp_i = kp[b, m].rashape(1, 8)
-                    if i == 0:
-                        dt_i = dt_k[b].view(1, 1)
-                    else:
-                        dt_i = torch.zeros(1, 1, device=device, dtype=dtype)
-                    gr_i = torch.stack([yaw_rate[b], pitch_rate[b]]).view(1, 2)
-                    yr_i, pr_i = policy(kp_i, gr_i, dt_i)
-                    yr_list.append(yr_i)
-                    pr_list.append(pr_i)
-
-                yaw_cmds[b] = torch.stack(yr_list).mean(0).squeeze(0)
-                pitch_cmds[b] = torch.stack(pr_list).mean(0).squeeze(0)
-
-            yaw, pitch, yaw_rate, pitch_rate = self.gimbal(
-                yaw, pitch, yaw_cmds, pitch_cmds, dt_k
-            )
-
-            muzzle_local = torch.stack(
-                [
-                    torch.full_like(yaw, self.muzzle_len),
-                    torch.zeros_like(yaw),
-                    torch.zeros_like(yaw),
-                ],
-                dim=-1,
-            )
-            muzzle_world = self._gimbal_to_world(
-                muzzle_local.unsqueeze(1), yaw, pitch
-            ).squeeze(1)
-
-            target_pos = ctr_w[:, 0]
-            hit_pos, t_fly, hit_dist = self.ballistic(
-                yaw, pitch, target_pos, muzzle_pos=muzzle_world
+            big = sql
+            masked = torch.where(
+                armor_valid, idx.unsqueeze(0).expand(bsz, sql),
+                torch.full_like(armor_valid, big, dtype=torch.long)
             )
 
             logs["keypoints"].append(kp)

@@ -3,7 +3,7 @@ import math
 import torch
 from torch import nn
 
-from diff_env.geometry import euler_to_rotmat
+from tools.math import geometry as gmt
 
 
 class BodyMotion(nn.Module):
@@ -72,7 +72,7 @@ class BodyMotion(nn.Module):
                 2 * math.pi * roll_freq.unsqueeze(1) * t
             )
 
-        rotations = euler_to_rotmat(yaw, pitch, roll)
+        rotations = gmt.euler_to_rotmat(yaw, pitch, roll)
 
         return {"positions": pos, "rotations": rotations}
 
@@ -121,7 +121,7 @@ class ArmorLayout(nn.Module):
         zeros = torch.zeros_like(yaws)
         rolls = torch.full_like(yaws, roll)
         half_pi = torch.full_like(yaws, math.pi / 2)
-        local_rotations = euler_to_rotmat(yaws + half_pi, zeros, rolls)
+        local_rotations = gmt.euler_to_rotmat(yaws + half_pi, zeros, rolls)
 
         w2 = self.armor_width / 2
         h2 = self.armor_height / 2

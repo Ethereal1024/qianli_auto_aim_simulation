@@ -38,7 +38,7 @@ def project(points):
     """world points [..., 3] -> pixel u, v."""
     cam = (points - CAM_POS) @ R_WC.T
     u = FX * cam[..., 0] / cam[..., 2] + IMAGE_W / 2
-    v = IMAGE_H / 2 + FX * cam[..., 1] / cam[..., 2]
+    v = FX * cam[..., 1] / cam[..., 2] + IMAGE_H / 2
     return u, v
 
 
@@ -93,7 +93,7 @@ RADIUS = 0.3                      # m, armor ring radius
 YAW = 0.0                         # deg, target heading at t = 0
 YAW_RATE = 5.0
 CAM_YAW = 0.0                     # deg, positive looks left
-FX = 800.0                        # px, focal length
+FX = 4000.0                        # px, focal length
 IMAGE_W, IMAGE_H = 1280, 1024     # px, image size
 SECONDS = 1000.0                    # s, clip length
 FPS = 60.0                        # frame slots per second of clip time
@@ -144,6 +144,7 @@ armor_frames = [triad(ax_armor, "B", 0.2)] + [
     triad(ax_armor, f"A{m}", 0.1) for m in range(N_ARMORS)]
 world_plates = [line3d(ax_world, "#666666", 1.0) for _ in range(N_ARMORS)]
 armor_plates = [line3d(ax_armor, c, 1.2) for c in ARMOR_COLORS]
+
 fills, edges, tags = [], [], []
 for m, color in enumerate(ARMOR_COLORS):
     fill = Polygon(np.zeros((4, 2)), closed=True, lw=0, alpha=0.35,
@@ -157,11 +158,13 @@ for m, color in enumerate(ARMOR_COLORS):
 cubes = np.vstack([corners.reshape(-1, 3), CAM_POS, np.zeros(3)])
 set_cube(ax_world, cubes, 0.1)
 set_cube(ax_armor, np.vstack([corners.reshape(-1, 3), BODY_POS]), 0.15)
+
 px_per_m = FX / DISTANCE                       # fixed zoom, no autozoom
 half = (RADIUS + 0.25) * px_per_m              # radius plus a margin, in px
-u_all, v_all = project(corners)
-ax_image.set_xlim(u_all.mean() - half, u_all.mean() + half)
-ax_image.set_ylim(v_all.mean() + half, v_all.mean() - half)   # v points down
+# ax_image.set_xlim(IMAGE_W / 2 - half, IMAGE_W / 2 + half)
+# ax_image.set_ylim(IMAGE_H / 2 + half, IMAGE_H / 2 - half)   # v points down
+ax_image.set_xlim(0, IMAGE_W)
+ax_image.set_ylim(IMAGE_H, 0)   # v points down
 ax_image.set_aspect("equal")
 ax_image.grid(alpha=0.3)
 ax_image.set_autoscale_on(False)

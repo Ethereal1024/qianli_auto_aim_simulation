@@ -1,7 +1,7 @@
 import torch
 from torch import nn
 
-from diff_env.geometry import project_to_normalized, rvec_to_rotmat
+from tools.math import geometry as gmt
 
 
 class Camera(nn.Module):
@@ -17,5 +17,5 @@ class Camera(nn.Module):
         
         valid = points_cam[..., 2] > eps
         
-        keypoints = project_to_normalized(points_cam, eps)
+        keypoints = gmt.project_to_normalized(points_cam, eps)
         return keypoints, valid
