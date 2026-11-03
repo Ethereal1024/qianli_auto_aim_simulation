@@ -66,6 +66,14 @@ def apply_transform(R, t, points):
     rotated = points @ xp.transpose(R)
     return rotated + t[..., None, :]
 
+def apply_transform_inverse(R, t, points):
+    return (points - t[..., None, :]) @ R
+
+def invert_transform(R, t):
+    xp = array_namespace(R, t)
+    R_inv = xp.transpose(R)
+    t_inv = -(R_inv @ t[..., None])[..., 0]
+    return R_inv, t_inv
 
 def project_to_normalized(points_cam, eps: float = 1e-6):
     xp = array_namespace(points_cam)

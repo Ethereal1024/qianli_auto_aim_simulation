@@ -25,6 +25,7 @@ from matplotlib.patches import Polygon
 from mpl_toolkits.mplot3d.art3d import Line3D, Text3D
 
 from diff_env.target import TargetMotion
+from visualize import CameraView
 
 
 def camera_rotation(yaw_deg):
@@ -131,6 +132,8 @@ body_pos = track["body_positions"][0].numpy()
 body_rot = track["body_rotations"][0].numpy()
 armor_rot = track["armor_rotations"][0].numpy()
 
+sql = centers.shape[0]
+
 # ------------------------------------------------------ figure and artists ---
 fig = plt.figure(figsize=(16.5, 5.2))
 ax_world = fig.add_subplot(1, 3, 1, projection="3d")
@@ -138,21 +141,20 @@ ax_armor = fig.add_subplot(1, 3, 2, projection="3d")
 ax_image = fig.add_subplot(1, 3, 3)
 fig.subplots_adjust(left=0.04, right=0.98, bottom=0.10, top=0.85, wspace=0.15)
 
+camera_view = CameraView(
+    ax=ax_image,
+    corners=corners,
+    centers=centers,
+    rots_wc=np.broadcast_to(R_WC.T, (sql, 3, 3)),
+    trans_wc=np.broadcast_to(CAM_POS[..., None].T, (sql, 3))
+)
+
 world_frames = [triad(ax_world, "W", 0.5), triad(ax_world, "C", 0.3),
                 triad(ax_world, "B", 0.25)]
 armor_frames = [triad(ax_armor, "B", 0.2)] + [
     triad(ax_armor, f"A{m}", 0.1) for m in range(N_ARMORS)]
 world_plates = [line3d(ax_world, "#666666", 1.0) for _ in range(N_ARMORS)]
 armor_plates = [line3d(ax_armor, c, 1.2) for c in ARMOR_COLORS]
-
-fills, edges, tags = [], [], []
-for m, color in enumerate(ARMOR_COLORS):
-    fill = Polygon(np.zeros((4, 2)), closed=True, lw=0, alpha=0.35,
-                   facecolor=color)
-    ax_image.add_patch(fill)
-    fills.append(fill)
-    edges.append(ax_image.plot([], [], color=color, lw=1.2)[0])
-    tags.append(ax_image.text(0, 0, f"A{m}", fontsize=8))
 
 # limits from every frame of the track: the scale never moves
 cubes = np.vstack([corners.reshape(-1, 3), CAM_POS, np.zeros(3)])
@@ -195,16 +197,7 @@ def update(index):
         world_plates[m].set_data_3d(*loop)
         armor_plates[m].set_data_3d(*loop)
 
-    u, v = project(plate)                          # (armors, 4)
-    normal = np.cross(plate[:, 1] - plate[:, 0], plate[:, 3] - plate[:, 0])
-    front = (normal * (CAM_POS - centers[index])).sum(-1) > 0
-    for m in range(N_ARMORS):
-        quad = closed(np.column_stack([u[m], v[m]]))
-        fills[m].set_xy(quad)
-        fills[m].set_visible(front[m])
-        edges[m].set_data(quad[:, 0], quad[:, 1])
-        edges[m].set_linestyle("-" if front[m] else ":")
-        tags[m].set_position((u[m].mean(), v[m].mean()))
+    camera_view.update(index)
 
 
 # ---------------------------------------------------------------- playback ---
@@ -214,7 +207,7 @@ start = time.perf_counter()
 # the artists that move; blitting repaints only these over a cached background
 moving = ([a for lines, text, _ in world_frames + armor_frames
            for a in (*lines, text)]
-          + world_plates + armor_plates + fills + edges + tags)
+          + world_plates + armor_plates + camera_view.fills + camera_view.edges + camera_view.tags)
 
 
 def animate(_tick):
