@@ -10,8 +10,8 @@ class CameraView(View):
     def __init__(
         self,
         ax,
-        corners: np.ndarray,
-        centers: np.ndarray,
+        armor_corners: np.ndarray,
+        armor_centers: np.ndarray,
         cam_rots: np.ndarray,
         cam_trans: np.ndarray,
         fx: float = 4000.0,
@@ -22,8 +22,8 @@ class CameraView(View):
         super().__init__(ax)
         self.n_armors = len(armor_colors)
 
-        self.corners = corners
-        self.centers = centers
+        self.armor_corners = armor_corners
+        self.armor_centers = armor_centers
         self.rots_cw = cam_rots
         self.trans_cw = cam_trans
 
@@ -49,8 +49,8 @@ class CameraView(View):
             self.tags.append(ax.text(0, 0, f"A{m}", fontsize=8))
 
     def update(self, index: int):
-        armor_kps = self.corners[index]
-        body_center = self.centers[index]
+        armor_kps = self.armor_corners[index]
+        body_center = self.armor_centers[index]
         r_wc, t_wc = gmt.invert_transform(self.rots_cw[index], self.trans_cw[index])
 
         u, v = self._camera_project(armor_kps, r_wc, t_wc)  # (armors, 4)
@@ -75,6 +75,9 @@ class CameraView(View):
                 
                 self.tags[m].set_visible(True)
                 self.tags[m].set_position((u[m].mean(), v[m].mean()))
+                
+    def get_moving_items(self) -> list:
+        return [*self.fills, *self.edges, *self.tags]
 
     def _camera_project(
         self, points_world: np.ndarray, r_wc: np.ndarray, t_wc: np.ndarray

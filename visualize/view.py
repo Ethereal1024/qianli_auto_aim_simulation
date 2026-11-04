@@ -10,5 +10,8 @@ class View(ABC):
     @abstractmethod
     def update(self, index: int) -> None: ...
     
+    @abstractmethod
+    def get_moving_items(self) -> list: ...
+    
     def _closed(self, points):
         return np.vstack([points, points[:1]])
