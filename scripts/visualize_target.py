@@ -26,14 +26,7 @@ from mpl_toolkits.mplot3d.art3d import Line3D, Text3D
 
 from diff_env.target import TargetMotion
 from visualize import CameraView
-
-
-def camera_rotation(yaw_deg):
-    """world -> camera rotation; positive yaw looks left."""
-    c, s = np.cos(np.radians(yaw_deg)), np.sin(np.radians(yaw_deg))
-    base = np.array([[0.0, -1.0, 0.0], [0.0, 0.0, -1.0], [1.0, 0.0, 0.0]])
-    return base @ np.array([[c, s, 0.0], [-s, c, 0.0], [0.0, 0.0, 1.0]])
-
+from tools.math import geometry as gmt
 
 def closed(points):
     """repeat the first point, so a polygon line ends where it starts."""
@@ -98,7 +91,7 @@ N_ARMORS = len(ARMOR_COLORS)
 # ---------------------------------------------------------------- geometry ---
 CAM_POS = np.array([0.0, 0.0, HEIGHT])
 BODY_POS = np.array([DISTANCE, 0.0, HEIGHT])
-R_WC = camera_rotation(CAM_YAW)
+R_CW = gmt.euler_to_rotmat(np.array(CAM_YAW - math.pi * 2 / 3), np.array(0), np.array(-math.pi / 2))
 N_FRAMES = max(2, round(SECONDS * FPS))
 
 
@@ -137,8 +130,9 @@ camera_view = CameraView(
     ax=ax_image,
     corners=corners,
     centers=centers,
-    rots_wc=np.broadcast_to(R_WC.T, (sql, 3, 3)),
-    trans_wc=np.broadcast_to(CAM_POS[..., None].T, (sql, 3))
+    cam_rots=np.broadcast_to(R_CW, (sql, 3, 3)),
+    cam_trans=np.broadcast_to(CAM_POS[..., None].T, (sql, 3)),
+    fx=1000.0
 )
 
 world_frames = [triad(ax_world, "W", 0.5), triad(ax_world, "C", 0.3),
@@ -169,7 +163,7 @@ def update(index):
     plate = corners[index]                         # (armors, 4, 3)
 
     place(world_frames[0], np.zeros(3), np.eye(3))
-    place(world_frames[1], CAM_POS, R_WC.T)
+    place(world_frames[1], CAM_POS, R_CW)
     place(world_frames[2], body_pos[index], body_rot[index])
     place(armor_frames[0], body_pos[index], body_rot[index])
     for m in range(N_ARMORS):
@@ -189,6 +183,10 @@ start = time.perf_counter()
 moving = ([a for lines, text, _ in world_frames + armor_frames
            for a in (*lines, text)]
           + world_plates + armor_plates + camera_view.fills + camera_view.edges + camera_view.tags)
+
+# moving = ([a for lines, text, _ in world_frames + armor_frames
+#            for a in (*lines, text)]
+#           + world_plates + armor_plates)
 
 
 def animate(_tick):
