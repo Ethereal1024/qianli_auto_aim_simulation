@@ -1,21 +1,19 @@
 import math
-import time
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-from matplotlib.animation import FuncAnimation
 
 from diff_env.target import TargetMotion
 from tools.math import geometry as gmt
-from visualize import CameraView, WorldView
+from visualize import Animator, CameraView, WorldView
 
 # ------------------------------------------------------------------- scene ---
 DISTANCE = 3.0  # m, target straight ahead of the camera
 HEIGHT = 0.5  # m, target and camera height
 RADIUS = 0.3  # m, armor ring radius
 YAW = 0.0  # deg, target heading at t = 0
-YAW_RATE = 5.0
+YAW_RATE = 8.0
 CAM_YAW = 0.0  # deg, positive looks left
 FX = 4000.0  # px, focal length
 IMAGE_W, IMAGE_H = 1280, 1024  # px, image size
@@ -72,7 +70,7 @@ camera_view = CameraView(
     armor_centers=centers,
     cam_rots=np.broadcast_to(R_CW, (sql, 3, 3)),
     cam_trans=np.broadcast_to(CAM_POS[..., None].T, (sql, 3)),
-    fx=1000.0,
+    fx=FX,
 )
 
 world_view = WorldView(
@@ -104,34 +102,10 @@ armor_view = WorldView(
     frames_trans=[body_pos, *[centers[:, m] for m in range(N_ARMORS)]],
 )
 
-
-def update(index):
-    world_view.update(index)
-    armor_view.update(index)
-    camera_view.update(index)
-
-
-# ---------------------------------------------------------------- playback ---
-update(0)
-start = time.perf_counter()
-
-# the artists that move; blitting repaints only these over a cached background
-moving = (
-    world_view.get_moving_items()
-    + armor_view.get_moving_items()
-    + camera_view.get_moving_items()
+animator = Animator(
+    fig=fig,
+    views=[camera_view, world_view, armor_view],
+    fps=FPS
 )
 
-
-def animate(_tick):
-    index = min(int((time.perf_counter() - start) / SECONDS * N_FRAMES), N_FRAMES - 1)
-    update(index)
-    if index == N_FRAMES - 1 and animation.event_source is not None:
-        animation.event_source.stop()
-    return moving
-
-
-animation = FuncAnimation(
-    fig, animate, interval=1000.0 / FPS, repeat=False, blit=True, cache_frame_data=False
-)
-plt.show()
+animator.play(SECONDS)
