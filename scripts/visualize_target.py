@@ -12,9 +12,9 @@ from visualize import Animator, CameraView, WorldView
 DISTANCE = 3.0  # m, target straight ahead of the camera
 HEIGHT = 0.5  # m, target and camera height
 RADIUS = 0.3  # m, armor ring radius
-YAW = 0.0  # deg, target heading at t = 0
+YAW = 0.0  # rad, target heading at t = 0
 YAW_RATE = 8.0
-CAM_YAW = 0.0  # deg, positive looks left
+CAM_YAW = 0.0  # rad, positive looks left
 FX = 4000.0  # px, focal length
 IMAGE_W, IMAGE_H = 1280, 1024  # px, image size
 SECONDS = 1000.0  # s, clip length
@@ -37,7 +37,7 @@ track = TargetMotion()(
     torch.linspace(0.0, SECONDS, N_FRAMES).unsqueeze(0),
     "complex",
     p0=torch.tensor([[DISTANCE, 0.0, HEIGHT]]),
-    yaw_0=torch.tensor([math.radians(YAW)]),
+    yaw_0=torch.tensor([YAW]),
     yaw_rate=YAW_RATE,
     yaw_rate_amp=0.5,
     yaw_rate_freq=0.3,
