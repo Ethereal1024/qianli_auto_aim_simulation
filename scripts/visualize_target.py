@@ -27,7 +27,7 @@ N_ARMORS = len(ARMOR_COLORS)
 # ---------------------------------------------------------------- geometry ---
 CAM_POS = np.array([0.0, 0.0, HEIGHT])
 BODY_POS = np.array([DISTANCE, 0.0, HEIGHT])
-R_CW = gmt.euler_to_rotmat(
+R_WC = gmt.euler_to_rotmat(
     np.array(CAM_YAW - math.pi / 2), np.array(0), np.array(-math.pi / 2)
 )
 N_FRAMES = max(2, round(SECONDS * FPS))
@@ -68,7 +68,7 @@ camera_view = CameraView(
     ax=ax_image,
     armor_corners=corners,
     armor_centers=centers,
-    cam_rots=np.broadcast_to(R_CW, (sql, 3, 3)),
+    cam_rots=np.broadcast_to(R_WC, (sql, 3, 3)),
     cam_trans=np.broadcast_to(CAM_POS[..., None].T, (sql, 3)),
     fx=FX,
 )
@@ -83,7 +83,7 @@ world_view = WorldView(
     ],
     frames_rots=[
         np.broadcast_to(np.eye(3), (sql, 3, 3)),
-        np.broadcast_to(R_CW, (sql, 3, 3)),
+        np.broadcast_to(R_WC, (sql, 3, 3)),
         body_rot,
     ],
     frames_trans=[

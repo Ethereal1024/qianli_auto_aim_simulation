@@ -24,8 +24,8 @@ class CameraView(View):
 
         self.armor_corners = armor_corners
         self.armor_centers = armor_centers
-        self.rots_cw = cam_rots
-        self.trans_cw = cam_trans
+        self.rots_wc = cam_rots
+        self.trans_wc = cam_trans
 
         self.fx = fx
         self.img_height = img_height
@@ -51,9 +51,10 @@ class CameraView(View):
     def update(self, index: int):
         armor_kps = self.armor_corners[index]
         body_center = self.armor_centers[index]
-        r_wc, t_wc = gmt.invert_transform(self.rots_cw[index], self.trans_cw[index])
+        r_wc, t_wc = self.rots_wc[index], self.trans_wc[index]
+        r_cw, t_cw = gmt.invert_transform(r_wc, t_wc)
 
-        u, v = self._camera_project(armor_kps, r_wc, t_wc)  # (armors, 4)
+        u, v = self._camera_project(armor_kps, r_cw, t_cw)  # (armors, 4)
         normal = np.cross(
             armor_kps[:, 1] - armor_kps[:, 0], armor_kps[:, 3] - armor_kps[:, 0]
         )
@@ -68,21 +69,21 @@ class CameraView(View):
                 quad = self._closed(np.column_stack([u[m], v[m]]))
                 self.fills[m].set_xy(quad)
                 self.fills[m].set_visible(front[m])
-                
+
                 self.edges[m].set_visible(True)
                 self.edges[m].set_data(quad[:, 0], quad[:, 1])
                 self.edges[m].set_linestyle("-" if front[m] else ":")
-                
+
                 self.tags[m].set_visible(True)
                 self.tags[m].set_position((u[m].mean(), v[m].mean()))
-                
+
     def get_moving_items(self) -> list:
         return [*self.fills, *self.edges, *self.tags]
 
     def _camera_project(
-        self, points_world: np.ndarray, r_wc: np.ndarray, t_wc: np.ndarray
+        self, points_world: np.ndarray, r_cw: np.ndarray, t_cw: np.ndarray
     ):
-        points_cam = gmt.apply_transform(r_wc, t_wc, points_world)
+        points_cam = gmt.apply_transform(r_cw, t_cw, points_world)
         points_img = gmt.project_to_normalized(points_cam)
         u = self.fx * points_img[..., 0] + self.img_width / 2
         v = self.fx * points_img[..., 1] + self.img_height / 2

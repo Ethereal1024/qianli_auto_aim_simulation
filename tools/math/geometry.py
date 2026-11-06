@@ -75,6 +75,9 @@ def invert_transform(R, t):
     t_inv = -(R_inv @ t[..., None])[..., 0]
     return R_inv, t_inv
 
+def compose_transform(R1, t1, R2, t2):
+    return R1 @ R2, R1 @ t2 + t1
+
 def project_to_normalized(points_cam, eps: float = 1e-6):
     xp = array_namespace(points_cam)
     z = xp.maximum(points_cam[..., 2:3], eps)
