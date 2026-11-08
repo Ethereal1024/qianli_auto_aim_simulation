@@ -11,7 +11,7 @@ class Camera(nn.Module):
         r_gc: torch.Tensor,
         t_gc: torch.Tensor,
         eps: float = 1e-6,
-    ):        
+    ) -> tuple[torch.Tensor, torch.Tensor]:        
         points_cam = gmt.apply_transform_inverse(r_gc, t_gc, points_gimbal)
         valid = points_cam[..., 2] > eps
         

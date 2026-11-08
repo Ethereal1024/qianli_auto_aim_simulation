@@ -26,7 +26,8 @@ class AutoAimPolicy(nn.Module, ABC):
     def forward(
         self,
         keypoints: torch.Tensor,
-        gimbal_vel: torch.Tensor,
+        yaw_vel: torch.Tensor,
+        pitch_vel: torch.Tensor,
         dt: torch.Tensor,
         state=None,
     ) -> Any: ...
@@ -43,7 +44,8 @@ class SimpleProportionalPolicy(AutoAimPolicy):
     def forward(
         self,
         keypoints: torch.Tensor,
-        gimbal_vel: torch.Tensor,
+        yaw_vel: torch.Tensor,
+        pitch_vel: torch.Tensor,
         dt: torch.Tensor,
         state=None,
     ):
@@ -58,6 +60,7 @@ class SimpleProportionalPolicy(AutoAimPolicy):
 class DiffSimulator(nn.Module):
     def __init__(
         self,
+        policy: AutoAimPolicy,
         cam_rotation: torch.Tensor | None = None,
         cam_offset: torch.Tensor | None = None,
         max_yaw_vel: float = 10.0,
@@ -70,6 +73,7 @@ class DiffSimulator(nn.Module):
         occlusion_factor: float = 0.0,
     ):
         super().__init__()
+        self.policy = policy
         self.gimbal = Gimbal(max_yaw_vel, max_pitch_vel)
         self.target = TargetMotion(armor_width, armor_height)
         self.camera = Camera()
@@ -107,21 +111,21 @@ class DiffSimulator(nn.Module):
 
     def _policy_step(
         self,
-        policy: AutoAimPolicy,
-        kp: torch.Tensor,
-        gimbal_vel: float,
-        dt: float,
-        state: torch.Tensor | list | tuple,
+        keypoints: torch.Tensor,
+        yaw_vel: torch.Tensor,
+        pitch_vel: torch.Tensor,
+        dt: torch.Tensor,
+        state: torch.Tensor | list | tuple | None,
         mask: torch.Tensor,
     ):
         if not mask.any():
-            zero = torch.zeros(kp.shape[0], 1, device=kp.device, dtype=kp.dtype)
+            zero = torch.zeros(keypoints.shape[0], 1, device=keypoints.device, dtype=keypoints.dtype)
             return zero, zero, state
-        yr, pr, state_new = policy(kp, gimbal_vel, dt, state)
-        yr = torch.where(mask.unsqueeze(-1), yr, torch.zeros_like(yr))
-        pr = torch.where(mask.unsqueeze(-1), pr, torch.zeros_like(pr))
-        state = self._mask_state(state, state_new, mask)
-        return yr, pr, state
+        yaw_vel_new, pitch_vel_new, state_new = self.policy(keypoints, yaw_vel, pitch_vel, dt, state)
+        yaw_vel_new = torch.where(mask.unsqueeze(-1), yaw_vel, torch.zeros_like(input=yaw_vel))
+        pitch_vel_new = torch.where(mask.unsqueeze(-1), pitch_vel, torch.zeros_like(input=pitch_vel))
+        state_new = self._mask_state(state, state_new, mask) if state is not None else None
+        return yaw_vel_new, pitch_vel_new, state_new
 
     def _world_to_gimbal(
         self,
@@ -189,8 +193,6 @@ class DiffSimulator(nn.Module):
         }
 
         r_gc = self.r_gc.unsqueeze(0).expand(bsz, -1, -1)
-        arange_bsz = torch.arange(bsz, device=device)
-        idx = torch.arange(sql, device=device)
 
         for k in range(sql):
             cnr_w = corners_world[:, k]  # [bsz, n_armors, 4, 3]
@@ -201,8 +203,8 @@ class DiffSimulator(nn.Module):
             ).reshape(bsz, n_armors, 4, 3)
             ctr_g = self._world_to_gimbal(ctr_w, yaw, pitch)
 
-            kp, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc)
-            kp = kp.reshape(bsz, n_armors, 4, 2)
+            keypoints, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc)
+            keypoints = keypoints.reshape(bsz, n_armors, 4, 2)
             valid = valid.reshape(bsz, n_armors, 4)
             armor_visible = valid.all(dim=-1)  # [bsz, n_armors]
 
@@ -223,55 +225,28 @@ class DiffSimulator(nn.Module):
             if self.training and self.occlusion_factor > 0:
                 keep = torch.rand_like(armor_visible.float()) >= self.occlusion_factor * cost
                 armor_visible = armor_visible & keep
+                
+            
 
-            # gather 到 [B, 8] 的 kp
-            kp_flat = kp.reshape(bsz, n_armors, 8)
-            kp_first = kp_flat[arange_bsz, first_idx.clamp(max=n_armors - 1)]
-            kp_second = kp_flat[arange_bsz, second_idx.clamp(max=n_armors - 1)]
-
-            gimbal_vel = torch.stack([yaw_vel, pitch_vel], dim=-1)  # [B, 2]
-            dt_k = dt[:, k].unsqueeze(-1)  # [B, 1]
-
-            # 第一块：dt 正常
-            yr0, pr0, state = self._policy_step(
-                policy,
-                kp_first,
-                gimbal_vel,
-                dt_k,
-                state,
-                has_first,
-            )
-
-            # 第二块：有第一块时 dt=0，否则（只有一块时）dt 正常
-            dt_second = torch.where(
-                has_first,
-                torch.zeros_like(dt_k),
-                dt_k,
-            )
-            yr1, pr1, state = self._policy_step(
-                policy,
-                kp_second,
-                gimbal_vel,
-                dt_second,
-                state,
-                has_second,
-            )
+            for m in range(n_armors):
+                batch_update = armor_visible[..., m]  # [bsz,]
+                yaw_vel, pitch_vel, state = self._policy_step(keypoints, yaw_vel, pitch_vel, dt, state, armor_visible)
 
             # 合并输出：两块平均，一块直取，零块为 0
-            both = has_first & has_second
-            yaw_cmd = torch.where(
-                both,
-                (yr0 + yr1) / 2,
-                torch.where(has_first, yr0, yr1),
-            )
-            pitch_cmd = torch.where(
-                both,
-                (pr0 + pr1) / 2,
-                torch.where(has_first, pr0, pr1),
-            )
-            has_any = has_first | has_second
-            yaw_cmd = torch.where(has_any, yaw_cmd, torch.zeros_like(yaw_cmd))
-            pitch_cmd = torch.where(has_any, pitch_cmd, torch.zeros_like(pitch_cmd))
+            # both = has_first & has_second
+            # yaw_cmd = torch.where(
+            #     both,
+            #     (yr0 + yr1) / 2,
+            #     torch.where(has_first, yr0, yr1),
+            # )
+            # pitch_cmd = torch.where(
+            #     both,
+            #     (pr0 + pr1) / 2,
+            #     torch.where(has_first, pr0, pr1),
+            # )
+            # has_any = has_first | has_second
+            # yaw_cmd = torch.where(has_any, yaw_cmd, torch.zeros_like(yaw_cmd))
+            # pitch_cmd = torch.where(has_any, pitch_cmd, torch.zeros_like(pitch_cmd))
 
             # 云台积分
             yaw, pitch, yaw_vel, pitch_vel = self.gimbal(
@@ -312,7 +287,7 @@ class DiffSimulator(nn.Module):
                 muzzle_pos=muzzle_world,
             )
 
-            logs["keypoints"].append(kp)
+            logs["keypoints"].append(keypoints)
             logs["valid"].append(armor_valid)
             logs["gimbal_yaw"].append(yaw)
             logs["gimbal_pitch"].append(pitch)
