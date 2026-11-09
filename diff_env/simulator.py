@@ -261,7 +261,7 @@ class DiffSimulator(nn.Module):
 
             for m in range(n_armors):
                 batch_update = armor_visible[..., m]  # [bsz,]
-                dt_for_policy = torch.where(dt_used, torch.zeros(bsz), dt[:, k])
+                dt_for_policy = torch.where(dt_used, torch.zeros_like(dt[:, k]), dt[:, k])
                 yaw_vel, pitch_vel, state = self._policy_step(
                     keypoints[:, m].reshape(bsz, 8),
                     yaw_vel,
@@ -322,8 +322,8 @@ class DiffSimulator(nn.Module):
             logs["update"].append(updated)
             logs["gimbal_yaw"].append(yaw)
             logs["gimbal_pitch"].append(pitch)
-            logs["yaw_vel"].append(yaw_vel.squeeze(-1))
-            logs["pitch_vel"].append(pitch_vel.squeeze(-1))
+            logs["yaw_vel"].append(yaw_vel)
+            logs["pitch_vel"].append(pitch_vel)
             logs["hit_pos"].append(hit_pos)
             logs["hit_dist"].append(hit_dist)
             logs["t_fly"].append(t_fly)
