@@ -24,7 +24,6 @@ class BodyMotion(nn.Module):
         p0 = _get("p0", (bsz, 3))
         sinus_amp = _get("sinus_amp", (bsz, 3))
         sinus_freq = _get("sinus_freq", (bsz, 3))
-        rw_sigma = _get("rw_sigma", (bsz, 3))
 
         pos = p0.unsqueeze(1).expand(-1, sln, -1)
 
@@ -32,12 +31,6 @@ class BodyMotion(nn.Module):
             pos = pos + sinus_amp.unsqueeze(1) * torch.sin(
                 2 * math.pi * sinus_freq.unsqueeze(1) * t_e
             )
-
-        if rw_sigma.abs().sum() > 0:
-            increments = torch.randn(
-                bsz, sln, 3, device=device, dtype=t.dtype
-            ) * rw_sigma.unsqueeze(1)
-            pos = pos + torch.cumsum(increments, dim=1)
 
         yaw_0 = _get("yaw_0", (bsz,))
         yaw_rate = _get("yaw_rate", (bsz,))

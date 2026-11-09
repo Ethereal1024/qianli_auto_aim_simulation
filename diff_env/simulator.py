@@ -71,12 +71,14 @@ class DiffSimulator(nn.Module):
         cam_offset: torch.Tensor | None = None,
         max_yaw_vel: float = 10.0,
         max_pitch_vel: float = 8.0,
+        v_nominal: float = 5.0,
         bullet_speed: float = 25.0,
         gravity: float = 9.81,
         muzzle_len: float = 0.15,
         armor_width: float = 0.12,
         armor_height: float = 0.06,
         occlusion_factor: float = 0.0,
+        keypoints_noise: float = 0.0,
     ):
         super().__init__()
         if policy is None:
@@ -91,6 +93,8 @@ class DiffSimulator(nn.Module):
         self.muzzle_len = muzzle_len
         self.occlusion_factor = occlusion_factor
         self.armor_size = armor_height * armor_width
+        self.keypoints_noise = keypoints_noise
+        self.v_nominal = v_nominal
 
         r_gc_src = R_GC_DEFAULT if cam_rotation is None else cam_rotation
         self.r_gc: torch.Tensor
@@ -122,38 +126,6 @@ class DiffSimulator(nn.Module):
         if isinstance(new, (tuple, list)) and isinstance(old, (tuple, list)):
             return type(new)(self._partial_update(o, n, mask) for o, n in zip(old, new))
         return new
-
-    def _policy_step(
-        self,
-        keypoints: torch.Tensor,
-        yaw_vel: torch.Tensor,
-        pitch_vel: torch.Tensor,
-        dt: torch.Tensor,
-        state: torch.Tensor | list | tuple | None,
-        mask: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor | list | tuple | None]:
-        if not mask.any():
-            zero = torch.zeros(
-                keypoints.shape[0], device=keypoints.device, dtype=keypoints.dtype
-            )
-            return zero, zero, state
-
-        yaw_vel_new, pitch_vel_new, state_new = self.policy(
-            keypoints=keypoints,
-            yaw_vel=yaw_vel,
-            pitch_vel=pitch_vel,
-            dt=dt,
-            cam_offset=self.t_gc,
-            bullet_speed=self.bullet_speed,
-            state=state,
-        )
-
-        yaw_vel_new = self._partial_update_tensor(yaw_vel, yaw_vel_new, mask)
-        pitch_vel_new = self._partial_update_tensor(pitch_vel, pitch_vel_new, mask)
-        state_new = (
-            self._partial_update(state, state_new, mask) if state is not None else None
-        )
-        return yaw_vel_new, pitch_vel_new, state_new
 
     def _world_to_gimbal(
         self,
@@ -204,6 +176,9 @@ class DiffSimulator(nn.Module):
         yaw_vel = torch.zeros(bsz, device=device, dtype=dtype)
         pitch_vel = torch.zeros(bsz, device=device, dtype=dtype)
 
+        yv_cmd = torch.zeros(bsz, dtype=torch.bool, device=device)
+        pv_cmd = torch.zeros(bsz, dtype=torch.bool, device=device)
+
         state = self.policy.init_state(bsz, device, dtype)
 
         logs: dict = {
@@ -232,6 +207,10 @@ class DiffSimulator(nn.Module):
             keypoints, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc)
             keypoints: torch.Tensor = keypoints.reshape(bsz, n_armors, 4, 2)
             valid: torch.Tensor = valid.reshape(bsz, n_armors, 4)
+            keypoints = torch.where(
+                valid.unsqueeze(-1), keypoints, torch.zeros_like(keypoints)
+            )
+
             armor_visible: torch.Tensor = valid.all(dim=-1)  # [bsz, n_armors]
 
             r_wg: torch.Tensor = gmt.euler_to_rotmat(yaw, -pitch, 0)
@@ -258,24 +237,40 @@ class DiffSimulator(nn.Module):
                 armor_visible = armor_visible & keep
 
             dt_used = torch.zeros(bsz, dtype=torch.bool, device=device)
+            keypoints = keypoints + torch.randn_like(keypoints) * self.keypoints_noise
 
             for m in range(n_armors):
                 batch_update = armor_visible[..., m]  # [bsz,]
-                dt_for_policy = torch.where(dt_used, torch.zeros_like(dt[:, k]), dt[:, k])
-                yaw_vel, pitch_vel, state = self._policy_step(
-                    keypoints[:, m].reshape(bsz, 8),
-                    yaw_vel,
-                    pitch_vel,
-                    dt_for_policy,
-                    state,
-                    batch_update,
+                dt_for_policy = torch.where(
+                    dt_used, torch.zeros_like(dt[:, k]), dt[:, k]
                 )
+
+                yv_cmd_new, pv_cmd_new, state_new = self.policy(
+                    keypoints=keypoints,
+                    yaw_vel=yaw_vel,
+                    pitch_vel=pitch_vel,
+                    dt=dt_for_policy,
+                    cam_offset=self.t_gc,
+                    bullet_speed=self.bullet_speed,
+                    state=state,
+                )
+
+                yv_cmd = self._partial_update_tensor(yv_cmd, yv_cmd_new, batch_update)
+                pv_cmd = self._partial_update_tensor(pv_cmd, pv_cmd_new, batch_update)
+                state = (
+                    self._partial_update(state, state_new, batch_update)
+                    if state is not None
+                    else None
+                )
+
                 dt_used = dt_used | batch_update
 
             # 云台积分
             yaw_new, pitch_new, yaw_vel_new, pitch_vel_new = self.gimbal(
                 yaw,
                 pitch,
+                yv_cmd * self.v_nominal,
+                pv_cmd * self.v_nominal,
                 yaw_vel,
                 pitch_vel,
                 dt[:, k],
@@ -307,16 +302,27 @@ class DiffSimulator(nn.Module):
             scores = torch.where(
                 armor_visible, scores, torch.full_like(scores, float("inf"))
             )
-            idx = scores.argmin(dim=-1)  # [bsz,]
-            index = idx[..., None, None].expand(bsz, 1, 3)
-            target_pos = torch.gather(ctr_w, 1, index).squeeze(1)  # [bsz, 3]
 
-            hit_pos, t_fly, hit_dist = self.ballistic(
-                yaw,
-                pitch,
-                target_pos,
-                muzzle_pos=muzzle_world,
-            )
+            idx = scores.argmin(dim=-1)  # [bsz,]
+            dist_now = scores.gather(1, idx.unsqueeze(-1)).squeeze(-1)  # [bsz,]
+            dist_now = torch.where(updated, dist_now, torch.zeros_like(dist_now))
+            t_fly = dist_now / self.bullet_speed
+
+            arange_batch = torch.arange(bsz, device=device)
+
+            hit_pos, hit_dist = None, None
+            for _ in range(3):
+                future = self.target(
+                    (t[:, k] + t_fly).unsqueeze(-1),
+                    mode="complex",
+                    **target_params,
+                )
+                future_ctr = future["centers"][:, 0]
+                target_pos = future_ctr[arange_batch, idx]
+
+                hit_pos, t_fly, hit_dist = self.ballistic(
+                    yaw, pitch, target_pos, muzzle_pos=muzzle_world, iters=3
+                )
 
             logs["keypoints"].append(keypoints)
             logs["update"].append(updated)
