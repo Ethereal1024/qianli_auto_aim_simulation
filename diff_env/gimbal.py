@@ -12,15 +12,15 @@ class Gimbal(nn.Module):
         self,
         yaw: torch.Tensor,
         pitch: torch.Tensor,
-        yaw_rate_cmd: torch.Tensor,
-        pitch_rate_cmd: torch.Tensor,
+        yaw_vel_cmd: torch.Tensor,
+        pitch_vel_cmd: torch.Tensor,
         dt: torch.Tensor,
     ):
         yaw_rate_actual = torch.clamp(
-            yaw_rate_cmd, -self.max_yaw_rate, self.max_yaw_rate
+            yaw_vel_cmd, -self.max_yaw_rate, self.max_yaw_rate
         )
         pitch_rate_actual = torch.clamp(
-            pitch_rate_cmd, -self.max_pitch_rate, self.max_pitch_rate
+            pitch_vel_cmd, -self.max_pitch_rate, self.max_pitch_rate
         )
         
         yaw_new = yaw + yaw_rate_actual * dt

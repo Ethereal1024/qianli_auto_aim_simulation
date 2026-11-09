@@ -30,6 +30,7 @@ class Ballistic(nn.Module):
         )
         v0 = self.bullet_speed * direction
         g = torch.tensor([0.0, 0.0, -self.gravity], device=device, dtype=dtype)
+        
         rel = target_pos - muzzel_pos
         
         # initial estimate, ignoring gravity
