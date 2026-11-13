@@ -47,8 +47,10 @@ track_params = {
     # "pitch_freq": 0.5,
 }
 
+timeline = torch.linspace(0.0, SECONDS, N_FRAMES)
+
 logs = DiffSimulator()(
-    t=torch.linspace(0.0, SECONDS, N_FRAMES).unsqueeze(0),
+    t=timeline.unsqueeze(0),
     target_params=track_params,
     init_yaw=torch.zeros(1),
     init_pitch=torch.zeros(1)
@@ -58,6 +60,9 @@ corners = logs["corners_world"][0].numpy()  # (frames, armors, 4, 3)
 centers = logs["centers_world"][0].numpy()
 cam_rots = logs["cam_rots"][0].numpy()
 cam_trans = logs["cam_trans"][0].numpy()
+hit_pos = logs["target_pos"][0].numpy()
+t_fly = logs["t_fly"][0].numpy()
+print(f"hit_pos_shape: {hit_pos.shape}")
 print(f"cam_rots_shape: {cam_rots.shape}")
 print(f"cam_trans_shape: {cam_trans.shape}")
 # body_pos = logs["body_positions"][0].numpy()
@@ -76,10 +81,13 @@ fig.suptitle("Visualize")
 
 camera_view = CameraView(
     ax=ax_image,
+    timeline=timeline.numpy(),
     armor_corners=corners,
     armor_centers=centers,
     cam_rots=cam_rots,
     cam_trans=cam_trans,
+    hit_positions=hit_pos,
+    t_fly=t_fly,
     fx=FX,
 )
 

@@ -11,7 +11,7 @@ class Animator:
         self,
         fig,
         views: list[View],
-        fps: float
+        fps: float = 60
     ) -> None:
         self.fig = fig
         self.views = views
@@ -26,8 +26,8 @@ class Animator:
         
         def animate(_tick):
             t = time.perf_counter() - start
-            self._update(t)
-            if index == n_frames - 1 and animation.event_source is not None:
+            move = self._update(t)
+            if not move and animation.event_source is not None:
                 animation.event_source.stop()
             return self.moving
                             
@@ -42,6 +42,6 @@ class Animator:
         
         plt.show()
         
-    def _update(self, index):
-        for view in self.views:
-            view.update(index) 
+    def _update(self, t):
+        results = [view.update(t) for view in self.views]
+        return any(results)

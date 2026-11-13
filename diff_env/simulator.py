@@ -197,6 +197,7 @@ class DiffSimulator(nn.Module):
             "yaw_vel": [],
             "pitch_vel": [],
             "hit_pos": [],
+            "target_pos": [],
             "hit_dist": [],
             "t_fly": [],
         }
@@ -212,7 +213,9 @@ class DiffSimulator(nn.Module):
             ).reshape(bsz, n_armors, 4, 3)
             # ctr_g = self._world_to_gimbal(ctr_w, yaw, pitch)
 
-            keypoints, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc, t_gc=self.t_gc)
+            keypoints, valid = self.camera(
+                cnr_g.reshape(bsz, n_armors * 4, 3), r_gc, t_gc=self.t_gc
+            )
             keypoints: torch.Tensor = keypoints.reshape(bsz, n_armors, 4, 2)
             valid: torch.Tensor = valid.reshape(bsz, n_armors, 4)
             keypoints = torch.where(
@@ -227,7 +230,7 @@ class DiffSimulator(nn.Module):
             normal = torch.cross(
                 cnr_w[..., 1, :] - cnr_w[..., 0, :],
                 cnr_w[..., 3, :] - cnr_w[..., 0, :],
-                dim=-1
+                dim=-1,
             )
             diff = t_wc.unsqueeze(1) - ctr_w
             drct_dot_prod = (normal * diff).sum(-1)
@@ -334,6 +337,13 @@ class DiffSimulator(nn.Module):
                     yaw, pitch, target_pos, muzzle_pos=muzzle_world, iters=3
                 )
 
+            future_final = self.target(
+                (t[:, k] + t_fly).unsqueeze(-1),
+                mode="complex",
+                **target_params,
+            )
+            target_pos_final = future_final["centers"][:, 0][arange_batch, idx]
+            hit_dist = torch.norm(hit_pos - target_pos_final, dim=-1)
 
             logs["cam_rots"].append(r_wg @ self.r_gc)
             logs["cam_trans"].append(t_wc)
@@ -344,6 +354,7 @@ class DiffSimulator(nn.Module):
             logs["yaw_vel"].append(yaw_vel)
             logs["pitch_vel"].append(pitch_vel)
             logs["hit_pos"].append(hit_pos)
+            logs["target_pos"].append(target_pos_final)
             logs["hit_dist"].append(hit_dist)
             logs["t_fly"].append(t_fly)
 

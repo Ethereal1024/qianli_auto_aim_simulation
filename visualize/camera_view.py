@@ -12,18 +12,19 @@ class CameraView(View):
     def __init__(
         self,
         ax,
+        timeline: np.ndarray,
         armor_corners: np.ndarray,
         armor_centers: np.ndarray,
         cam_rots: np.ndarray,
         cam_trans: np.ndarray,
         hit_positions: np.ndarray | None = None,
-        hit_index: np.ndarray | None = None,
+        t_fly: np.ndarray | None = None,
         fx: float = 4000.0,
         img_height: int = 1024,
         img_width: int = 1280,
         armor_colors: tuple[str, ...] = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd"),
     ):
-        super().__init__(ax)
+        super().__init__(ax, timeline)
         self.n_armors = len(armor_colors)
 
         self.armor_corners = armor_corners
@@ -51,28 +52,55 @@ class CameraView(View):
             self.fills.append(fill)
             self.edges.append(ax.plot([], [], color=color, lw=1.2)[0])
             self.tags.append(ax.text(0, 0, f"A{m}", fontsize=8))
-            
+
         self.hit_positions = hit_positions
-        self.hit_index = hit_index
-        self.pointer = 0
+        self.hit_timeline = timeline + t_fly if t_fly is not None else None
+
+        self.fade_duration = 0.01
+        self.hit_scatter = ax.scatter(
+            [], [], marker="x", s=100,
+            linewidths=2, c="black",
+        )
+        self.hit_scatter.set_visible(False)
+
+    def update(self, t: float):
+        if t > self.timeline[-1]:
+            return False
         
-        
-    def update(self, index: int):
+        index = self._time_query(t, self.timeline)
         armor_kps = self.armor_corners[index]
-        body_center = self.armor_centers[index]
+        armor_centers = self.armor_centers[index]
         r_wc, t_wc = self.rots_wc[index], self.trans_wc[index]
         r_cw, t_cw = gmt.invert_transform(r_wc, t_wc)
-        
-        if self.hit_positions and self.hit_index:
-            if index == self.hit_index[self.pointer]:
-                x, y = self._camera_project(self.hit_positions[self.pointer], r_cw, t_cw)
+
+        if self.hit_positions is not None and self.hit_timeline is not None:
+            ages = t - self.hit_timeline
+            active = (ages >= 0) & (ages < self.fade_duration)
+            active_idx = np.where(active)[0]
+            
+            if len(active_idx) > 0:
+                positions = self.hit_positions[active_idx]
+                u_hits, v_hits = self._camera_project(positions, r_cw, t_cw)
+                alphas = np.clip(1.0 - ages[active_idx] / self.fade_duration, 0, 1)
+                # print(f"t={t:.2f}, K={len(active_idx)}, u={u_hits[:3]}, v={v_hits[:3]}")
+
+                rgba = np.zeros((len(active_idx), 4))
+                rgba[:, :3] = 0.0
+                rgba[:, 3] = alphas
                 
+                self.hit_scatter.set_offsets(np.column_stack([u_hits, v_hits]))
+                self.hit_scatter.set_facecolors(rgba)
+                self.hit_scatter.set_visible(True)
+            else:
+                self.hit_scatter.set_visible(False)
+                    
+                    
 
         u, v = self._camera_project(armor_kps, r_cw, t_cw)  # (armors, 4)
         normal = np.cross(
             armor_kps[:, 1] - armor_kps[:, 0], armor_kps[:, 3] - armor_kps[:, 0]
         )
-        front = (normal * (t_wc - body_center)).sum(-1) > 0
+        front = (normal * (t_wc - armor_centers)).sum(-1) > 0
         visible = self._quad_in_view(u, v)
         for m in range(self.n_armors):
             if not visible:
@@ -90,9 +118,10 @@ class CameraView(View):
 
                 self.tags[m].set_visible(True)
                 self.tags[m].set_position((u[m].mean(), v[m].mean()))
+        return True
 
     def get_moving_items(self) -> list:
-        return [*self.fills, *self.edges, *self.tags]
+        return [*self.fills, *self.edges, *self.tags, self.hit_scatter]
 
     def _camera_project(
         self, points_world: np.ndarray, r_cw: np.ndarray, t_cw: np.ndarray
