@@ -41,6 +41,9 @@ class TorchBackend(ArrayBackend):
     def norm(self, x, *, axis, keepdims=False):
         return torch.linalg.vector_norm(x, dim=axis, keepdim=keepdims)
     
+    def clamp(self, x, min=None, max=None) -> Any:
+        return torch.clamp(x, min=min, max=max)
+    
     def stack(self, seq, *, axis):
         return torch.stack(seq, dim=axis)
     

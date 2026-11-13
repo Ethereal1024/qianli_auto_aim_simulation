@@ -6,11 +6,12 @@ from typing import Any
 import torch
 from torch import nn
 
-from diff_env.ballistic import Ballistic
-from diff_env.camera import Camera
-from diff_env.gimbal import Gimbal
-from diff_env.target import TargetMotion
 from tools.math import geometry as gmt
+
+from .ballistic import Ballistic
+from .camera import Camera
+from .gimbal import Gimbal
+from .target import TargetMotion
 
 R_GC_DEFAULT = torch.tensor([[0.0, 0.0, 1.0], [-1.0, 0.0, 0.0], [0.0, -1.0, 0.0]])
 
@@ -60,13 +61,13 @@ class SimpleProportionalPolicy(AutoAimPolicy):
 
         yaw_vel_cmd = torch.tanh(-self.gain * cx).squeeze(-1)
         pitch_vel_cmd = torch.tanh(-self.gain * cy).squeeze(-1)
-        return yaw_vel_cmd, pitch_vel_cmd
+        return yaw_vel_cmd, pitch_vel_cmd, None
 
 
 class DiffSimulator(nn.Module):
     def __init__(
         self,
-        policy: AutoAimPolicy,
+        policy: AutoAimPolicy | None = None,
         cam_rotation: torch.Tensor | None = None,
         cam_offset: torch.Tensor | None = None,
         max_yaw_vel: float = 10.0,
@@ -167,7 +168,7 @@ class DiffSimulator(nn.Module):
         # target
         tgt = self.target(t, mode="complex", **target_params)
         corners_world: torch.Tensor = tgt["corners"]  # [bsz, sql, n_armors, 4, 3]
-        centets_world: torch.Tensor = tgt["centers"]  # [bsz, sql, n_armors, 3]
+        centers_world: torch.Tensor = tgt["centers"]  # [bsz, sql, n_armors, 3]
         n_armors = corners_world.shape[2]
 
         # gimbal
@@ -182,6 +183,13 @@ class DiffSimulator(nn.Module):
         state = self.policy.init_state(bsz, device, dtype)
 
         logs: dict = {
+            "centers_world": centers_world,
+            "corners_world": corners_world,
+            "body_positions": tgt["body_positions"],
+            "body_rotations": tgt["body_rotations"],
+            "armor_rotations": tgt["armor_rotations"],
+            "cam_rots": [],
+            "cam_trans": [],
             "keypoints": [],
             "update": [],
             "gimbal_yaw": [],
@@ -197,14 +205,14 @@ class DiffSimulator(nn.Module):
 
         for k in range(sql):
             cnr_w = corners_world[:, k]  # [bsz, n_armors, 4, 3]
-            ctr_w = centets_world[:, k]  # [bsz, n_armors, 3]
+            ctr_w = centers_world[:, k]  # [bsz, n_armors, 3]
 
             cnr_g = self._world_to_gimbal(
                 cnr_w.reshape(bsz, n_armors * 4, 3), yaw, pitch
             ).reshape(bsz, n_armors, 4, 3)
             # ctr_g = self._world_to_gimbal(ctr_w, yaw, pitch)
 
-            keypoints, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc)
+            keypoints, valid = self.camera(cnr_g.reshape(bsz, n_armors * 4, 3), r_gc, t_gc=self.t_gc)
             keypoints: torch.Tensor = keypoints.reshape(bsz, n_armors, 4, 2)
             valid: torch.Tensor = valid.reshape(bsz, n_armors, 4)
             keypoints = torch.where(
@@ -213,12 +221,13 @@ class DiffSimulator(nn.Module):
 
             armor_visible: torch.Tensor = valid.all(dim=-1)  # [bsz, n_armors]
 
-            r_wg: torch.Tensor = gmt.euler_to_rotmat(yaw, -pitch, 0)
+            r_wg: torch.Tensor = gmt.euler_to_rotmat(yaw, -pitch, torch.zeros_like(yaw))
             t_wc = r_wg @ self.t_gc
 
             normal = torch.cross(
                 cnr_w[..., 1, :] - cnr_w[..., 0, :],
                 cnr_w[..., 3, :] - cnr_w[..., 0, :],
+                dim=-1
             )
             diff = t_wc.unsqueeze(1) - ctr_w
             drct_dot_prod = (normal * diff).sum(-1)
@@ -246,13 +255,14 @@ class DiffSimulator(nn.Module):
                 )
 
                 yv_cmd_new, pv_cmd_new, state_new = self.policy(
-                    keypoints=keypoints,
+                    keypoints=keypoints[:, m].reshape(bsz, 8),
                     yaw_vel=yaw_vel,
                     pitch_vel=pitch_vel,
                     dt=dt_for_policy,
                     cam_offset=self.t_gc,
                     bullet_speed=self.bullet_speed,
                     state=state,
+                    muzzle_len=self.muzzle_len,
                 )
 
                 yv_cmd = self._partial_update_tensor(yv_cmd, yv_cmd_new, batch_update)
@@ -324,6 +334,9 @@ class DiffSimulator(nn.Module):
                     yaw, pitch, target_pos, muzzle_pos=muzzle_world, iters=3
                 )
 
+
+            logs["cam_rots"].append(r_wg @ self.r_gc)
+            logs["cam_trans"].append(t_wc)
             logs["keypoints"].append(keypoints)
             logs["update"].append(updated)
             logs["gimbal_yaw"].append(yaw)
@@ -335,6 +348,7 @@ class DiffSimulator(nn.Module):
             logs["t_fly"].append(t_fly)
 
         for key in list(logs.keys()):
-            logs[key] = torch.stack(logs[key], dim=1)
+            if isinstance(logs[key], list):
+                logs[key] = torch.stack(logs[key], dim=1)
 
         return logs

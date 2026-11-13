@@ -1,3 +1,5 @@
+from collections import deque
+
 import numpy as np
 from matplotlib.patches import Polygon
 
@@ -14,6 +16,8 @@ class CameraView(View):
         armor_centers: np.ndarray,
         cam_rots: np.ndarray,
         cam_trans: np.ndarray,
+        hit_positions: np.ndarray | None = None,
+        hit_index: np.ndarray | None = None,
         fx: float = 4000.0,
         img_height: int = 1024,
         img_width: int = 1280,
@@ -47,12 +51,22 @@ class CameraView(View):
             self.fills.append(fill)
             self.edges.append(ax.plot([], [], color=color, lw=1.2)[0])
             self.tags.append(ax.text(0, 0, f"A{m}", fontsize=8))
-
+            
+        self.hit_positions = hit_positions
+        self.hit_index = hit_index
+        self.pointer = 0
+        
+        
     def update(self, index: int):
         armor_kps = self.armor_corners[index]
         body_center = self.armor_centers[index]
         r_wc, t_wc = self.rots_wc[index], self.trans_wc[index]
         r_cw, t_cw = gmt.invert_transform(r_wc, t_wc)
+        
+        if self.hit_positions and self.hit_index:
+            if index == self.hit_index[self.pointer]:
+                x, y = self._camera_project(self.hit_positions[self.pointer], r_cw, t_cw)
+                
 
         u, v = self._camera_project(armor_kps, r_cw, t_cw)  # (armors, 4)
         normal = np.cross(

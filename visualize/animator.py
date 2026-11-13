@@ -25,8 +25,8 @@ class Animator:
         start = time.perf_counter()
         
         def animate(_tick):
-            index = min(int((time.perf_counter() - start) / seconds * n_frames), n_frames - 1)
-            self._update(index)
+            t = time.perf_counter() - start
+            self._update(t)
             if index == n_frames - 1 and animation.event_source is not None:
                 animation.event_source.stop()
             return self.moving

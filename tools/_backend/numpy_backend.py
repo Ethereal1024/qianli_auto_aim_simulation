@@ -1,4 +1,6 @@
 
+from typing import Any
+
 import numpy as np
 
 from .base import ArrayBackend
@@ -36,6 +38,9 @@ class NumpyBackend(ArrayBackend):
     
     def sum(self, x, *, axis, keepdims=False):
         return np.sum(x, axis=axis, keepdims=keepdims)
+    
+    def clamp(self, x, min=None, max=None):
+        return np.clip(x, a_min=min, a_max=max)
     
     def stack(self, seq, *, axis):
         return np.stack(seq, axis=axis)

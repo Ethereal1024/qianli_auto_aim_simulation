@@ -80,7 +80,8 @@ def compose_transform(R1, t1, R2, t2):
 
 def project_to_normalized(points_cam, eps: float = 1e-6):
     xp = array_namespace(points_cam)
-    z = xp.maximum(points_cam[..., 2:3], eps)
+    z_raw = points_cam[..., 2:3]
+    z = xp.clamp(z_raw, min=eps)
     return xp.stack([
         points_cam[..., 0:1] / z,
         points_cam[..., 1:2] / z,
@@ -91,6 +92,6 @@ def compute_az_el(points_gimbal, eps=1e-8):
     xp = array_namespace(points_gimbal)
     x, y, z = (points_gimbal[..., i] for i in range(3))
     az = xp.atan2(x, y)
-    h  = xp.maximum(xp.sqrt(x * x + y * y), eps)
+    h  = xp.clamp(xp.sqrt(x * x + y * y), min=eps)
     el = xp.atan2(z, h)
     return xp.stack([az, el], axis=-1)

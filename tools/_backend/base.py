@@ -34,6 +34,9 @@ class ArrayBackend(ABC):
     def norm(self, x, *, axis, keepdims=False) -> Any:
         return self.sqrt(self.sum(x * x, axis=axis, keepdims=keepdims))
     
+    @abstractmethod
+    def clamp(self, x, min=None, max=None) -> Any: ...
+    
     # manipulation
     @abstractmethod
     def stack(self, seq, *, axis) -> Any: ...

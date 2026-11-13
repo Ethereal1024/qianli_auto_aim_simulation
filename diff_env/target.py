@@ -171,15 +171,10 @@ class TargetMotion(nn.Module):
         corners = centers.unsqueeze(-2) + torch.einsum(
             "btmij,cj->btmci", world_rot, corners_local
         )
-        # facing direction of each plate: local +Z is the plate normal
-        normal_local = torch.tensor([0.0, 0.0, 1.0], device=device, dtype=radius.dtype)
-        world_normal = torch.einsum("btmij,j->btmi", world_rot, normal_local)
-        armor_yaws = torch.atan2(world_normal[..., 1], world_normal[..., 0])
 
         return {
             "corners": corners,
             "centers": centers,
-            "armor_yaws": armor_yaws,
             "armor_rotations": world_rot,
             "body_positions": body_pos,
             "body_rotations": body_rot,

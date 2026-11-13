@@ -13,15 +13,15 @@ class Ballistic(nn.Module):
         yaw: torch.Tensor,
         pitch: torch.Tensor,
         target_pos: torch.Tensor,
-        muzzel_pos: torch.Tensor | None = None,
+        muzzle_pos: torch.Tensor | None = None,
         iters: int = 5
     ):
         bsz = yaw.shape[0]
         device = yaw.device
         dtype = yaw.dtype
         
-        if muzzel_pos is None:
-            muzzel_pos = torch.zeros(bsz, 3, device=device, dtype=dtype)
+        if muzzle_pos is None:
+            muzzle_pos = torch.zeros(bsz, 3, device=device, dtype=dtype)
             
         cos_p, sin_p = torch.cos(pitch), torch.sin(pitch)
         cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
@@ -31,10 +31,19 @@ class Ballistic(nn.Module):
         v0 = self.bullet_speed * direction
         g = torch.tensor([0.0, 0.0, -self.gravity], device=device, dtype=dtype)
         
-        rel = target_pos - muzzel_pos
+        rel = target_pos - muzzle_pos
+        d = torch.norm(rel, dim=-1)
+        
+        forward_proj = (v0 * rel).sum(-1)
+        shootable = forward_proj > 0
         
         # initial estimate, ignoring gravity
-        t = torch.norm(rel, dim=-1) / self.bullet_speed
+        t = torch.where(
+            shootable,
+            forward_proj / (self.bullet_speed ** 2),
+            torch.zeros_like(d)
+        )
+        t = torch.minimum(t, 2.0 * d / self.bullet_speed).clamp(min=0.0)
         
         # Newton iteration
         for _ in range(iters):
@@ -46,8 +55,9 @@ class Ballistic(nn.Module):
             fp = (dp * dp).sum(-1) + (u * g).sum(-1)
             
             t = t - f / fp.clamp(min=1e-6)
+            t = torch.minimum(t, 2.0 * d / self.bullet_speed).clamp(min=0.0)
             
-        hit_pos = muzzel_pos + v0 * t.unsqueeze(-1) + 0.5 * g * (t.unsqueeze(-1) ** 2)
-        hit_dist = torch.norm(hit_pos)
+        hit_pos = muzzle_pos + v0 * t.unsqueeze(-1) + 0.5 * g * (t.unsqueeze(-1) ** 2)
+        hit_dist = torch.norm(hit_pos, dim=-1)
         
         return hit_pos, t, hit_dist
