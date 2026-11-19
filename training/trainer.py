@@ -21,6 +21,9 @@ class TrainConfig:
     checkpoint_interval: int = 2000
     checkpoint_dir: str = "checkpoints"
     seed: int = 0
+    margin: float = 0.05
+    temperature: float = 0.02
+    fire_weight: float = 1.0
 
 
 class Trainer:
@@ -71,8 +74,21 @@ class Trainer:
     def _compute_loss(self, logs):
         mask = logs["update"].float()
         n_valid = mask.sum()
+
         hit_loss = (logs["hit_dist"] * mask).sum() / n_valid.clamp(min=1.0)
-        return hit_loss, mask, n_valid
+
+        fire_target = torch.sigmoid(
+            (self.cfg.margin - logs["hit_dist"]) / self.cfg.temperature
+        ).detach()
+        fire_prob = logs["fire_prob"].clamp(1e-6, 1 - 1e-6)
+        fire_loss = -(
+            fire_target * torch.log(fire_prob)
+            + (1 - fire_target) * torch.log(1 - fire_prob)
+        )
+        fire_loss = (fire_loss * mask).sum() / n_valid.clamp(min=1.0)
+
+        loss = hit_loss + self.cfg.fire_weight * fire_loss
+        return loss, mask, n_valid
 
     def train_step(self) -> dict:
         self.sim.train()

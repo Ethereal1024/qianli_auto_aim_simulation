@@ -32,9 +32,10 @@ R_WC = gmt.euler_to_rotmat(
 )
 N_FRAMES = max(2, round(SECONDS * FPS))
 
+timeline = torch.linspace(0.0, SECONDS, N_FRAMES)
 
 track = TargetMotion()(
-    torch.linspace(0.0, SECONDS, N_FRAMES).unsqueeze(0),
+    timeline.unsqueeze(0),
     "complex",
     p0=torch.tensor([[DISTANCE, 0.0, HEIGHT]]),
     yaw_0=torch.tensor([YAW]),
@@ -66,6 +67,7 @@ fig.suptitle("Visualize")
 
 camera_view = CameraView(
     ax=ax_image,
+    timeline=timeline.numpy(),
     armor_corners=corners,
     armor_centers=centers,
     cam_rots=np.broadcast_to(R_WC, (sql, 3, 3)),
@@ -75,6 +77,7 @@ camera_view = CameraView(
 
 world_view = WorldView(
     ax=ax_world,
+    timeline=timeline.numpy(),
     armor_corners=corners,
     frames_metas=[
         ("W", 0.5),
@@ -96,6 +99,7 @@ world_view = WorldView(
 
 armor_view = WorldView(
     ax=ax_armor,
+    timeline=timeline.numpy(),
     armor_corners=corners,
     frames_metas=[("B", 0.25), *[(f"A{m}", 0.1) for m in range(N_ARMORS)]],
     frames_rots=[body_rot, *[armor_rot[:, m] for m in range(N_ARMORS)]],

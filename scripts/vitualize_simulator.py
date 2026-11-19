@@ -31,6 +31,7 @@ R_WC = gmt.euler_to_rotmat(
     np.array(CAM_YAW - math.pi / 2), np.array(0), np.array(-math.pi / 2)
 )
 N_FRAMES = max(2, round(SECONDS * FPS))
+FIRE_THRESHOLD = 0.95
 
 
 track_params = {
@@ -60,21 +61,22 @@ corners = logs["corners_world"][0].numpy()  # (frames, armors, 4, 3)
 centers = logs["centers_world"][0].numpy()
 cam_rots = logs["cam_rots"][0].numpy()
 cam_trans = logs["cam_trans"][0].numpy()
-hit_pos = logs["target_pos"][0].numpy()
+hit_pos = logs["hit_pos"][0].numpy()
 t_fly = logs["t_fly"][0].numpy()
+fire_prob = logs["fire_prob"][0].numpy()
 print(f"hit_pos_shape: {hit_pos.shape}")
 print(f"cam_rots_shape: {cam_rots.shape}")
 print(f"cam_trans_shape: {cam_trans.shape}")
-# body_pos = logs["body_positions"][0].numpy()
-# body_rot = logs["body_rotations"][0].numpy()
-# armor_rot = logs["armor_rotations"][0].numpy()
+body_pos = logs["body_positions"][0].numpy()
+body_rot = logs["body_rotations"][0].numpy()
+armor_rot = logs["armor_rotations"][0].numpy()
 
 sql = centers.shape[0]
 
 # ------------------------------------------------------ figure and artists ---
 fig = plt.figure(figsize=(16.5, 5.2))
-# ax_world = fig.add_subplot(1, 3, 1, projection="3d")
-# ax_armor = fig.add_subplot(1, 3, 2, projection="3d")
+ax_world = fig.add_subplot(1, 3, 1, projection="3d")
+ax_armor = fig.add_subplot(1, 3, 2, projection="3d")
 ax_image = fig.add_subplot(1, 3, 3)
 fig.subplots_adjust(left=0.04, right=0.98, bottom=0.10, top=0.85, wspace=0.15)
 fig.suptitle("Visualize")
@@ -88,41 +90,50 @@ camera_view = CameraView(
     cam_trans=cam_trans,
     hit_positions=hit_pos,
     t_fly=t_fly,
+    fire=fire_prob > FIRE_THRESHOLD,
     fx=FX,
 )
 
-# world_view = WorldView(
-#     ax=ax_world,
-#     armor_corners=corners,
-#     frames_metas=[
-#         ("W", 0.5),
-#         ("C", 0.3),
-#         ("B", 0.25),
-#     ],
-#     frames_rots=[
-#         np.broadcast_to(np.eye(3), (sql, 3, 3)),
-#         np.broadcast_to(R_WC, (sql, 3, 3)),
-#         body_rot,
-#     ],
-#     frames_trans=[
-#         np.broadcast_to(np.zeros(3), (sql, 3)),
-#         np.broadcast_to(CAM_POS, (sql, 3)),
-#         body_pos,
-#     ],
-#     armor_colors=("#666666", "#666666", "#666666", "#666666"),
-# )
+world_view = WorldView(
+    ax=ax_world,
+    timeline=timeline.numpy(),
+    armor_corners=corners,
+    frames_metas=[
+        ("W", 0.5),
+        ("C", 0.3),
+        ("B", 0.25),
+    ],
+    frames_rots=[
+        np.broadcast_to(np.eye(3), (sql, 3, 3)),
+        cam_rots,
+        body_rot,
+    ],
+    frames_trans=[
+        np.broadcast_to(np.zeros(3), (sql, 3)),
+        cam_trans,
+        body_pos,
+    ],
+    armor_colors=("#666666", "#666666", "#666666", "#666666"),
+    hit_positions=hit_pos,
+    t_fly=t_fly,
+    fire=fire_prob > FIRE_THRESHOLD,
+)
 
-# armor_view = WorldView(
-#     ax=ax_armor,
-#     armor_corners=corners,
-#     frames_metas=[("B", 0.25), *[(f"A{m}", 0.1) for m in range(N_ARMORS)]],
-#     frames_rots=[body_rot, *[armor_rot[:, m] for m in range(N_ARMORS)]],
-#     frames_trans=[body_pos, *[centers[:, m] for m in range(N_ARMORS)]],
-# )
+armor_view = WorldView(
+    ax=ax_armor,
+    timeline=timeline.numpy(),
+    armor_corners=corners,
+    frames_metas=[("B", 0.25), *[(f"A{m}", 0.1) for m in range(N_ARMORS)]],
+    frames_rots=[body_rot, *[armor_rot[:, m] for m in range(N_ARMORS)]],
+    frames_trans=[body_pos, *[centers[:, m] for m in range(N_ARMORS)]],
+    hit_positions=hit_pos,
+    t_fly=t_fly,
+    fire=fire_prob > FIRE_THRESHOLD,
+)
 
 animator = Animator(
     fig=fig,
-    views=[camera_view],
+    views=[camera_view, world_view, armor_view],
     fps=FPS
 )
 

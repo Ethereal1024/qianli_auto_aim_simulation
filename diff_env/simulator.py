@@ -7,6 +7,7 @@ import torch
 from torch import nn
 
 from tools.math import geometry as gmt
+from dataclasses import dataclass
 
 from .ballistic import Ballistic
 from .camera import Camera
@@ -34,7 +35,7 @@ class AutoAimPolicy(nn.Module, ABC):
         muzzle_len: float,
         bullet_speed: float,
         state=None,
-    ) -> Any: ...
+    ) -> tuple[torch.Tensor | None, torch.Tensor, torch.Tensor, torch.Tensor]: ...
 
 
 class SimpleProportionalPolicy(AutoAimPolicy):
@@ -59,9 +60,11 @@ class SimpleProportionalPolicy(AutoAimPolicy):
         cx = keypoints[..., 0::2].mean(-1, keepdim=True)
         cy = keypoints[..., 1::2].mean(-1, keepdim=True)
 
+        fire_prob = torch.sigmoid(-(cx**2 + cy**2) / 0.1 + 3)
+
         yaw_vel_cmd = torch.tanh(-self.gain * cx).squeeze(-1)
         pitch_vel_cmd = torch.tanh(-self.gain * cy).squeeze(-1)
-        return yaw_vel_cmd, pitch_vel_cmd, None
+        return state, fire_prob, yaw_vel_cmd, pitch_vel_cmd
 
 
 class DiffSimulator(nn.Module):
@@ -177,8 +180,9 @@ class DiffSimulator(nn.Module):
         yaw_vel = torch.zeros(bsz, device=device, dtype=dtype)
         pitch_vel = torch.zeros(bsz, device=device, dtype=dtype)
 
-        yv_cmd = torch.zeros(bsz, dtype=torch.bool, device=device)
-        pv_cmd = torch.zeros(bsz, dtype=torch.bool, device=device)
+        yv_cmd = torch.zeros(bsz, dtype=dtype, device=device)
+        pv_cmd = torch.zeros(bsz, dtype=dtype, device=device)
+        fire_prob = torch.zeros(bsz, dtype=dtype, device=device)
 
         state = self.policy.init_state(bsz, device, dtype)
 
@@ -196,6 +200,7 @@ class DiffSimulator(nn.Module):
             "gimbal_pitch": [],
             "yaw_vel": [],
             "pitch_vel": [],
+            "fire_prob": [],
             "hit_pos": [],
             "target_pos": [],
             "hit_dist": [],
@@ -257,7 +262,7 @@ class DiffSimulator(nn.Module):
                     dt_used, torch.zeros_like(dt[:, k]), dt[:, k]
                 )
 
-                yv_cmd_new, pv_cmd_new, state_new = self.policy(
+                state_new, fire_prob_new, yv_cmd_new, pv_cmd_new = self.policy(
                     keypoints=keypoints[:, m].reshape(bsz, 8),
                     yaw_vel=yaw_vel,
                     pitch_vel=pitch_vel,
@@ -267,7 +272,8 @@ class DiffSimulator(nn.Module):
                     state=state,
                     muzzle_len=self.muzzle_len,
                 )
-
+                
+                fire_prob = self._partial_update_tensor(fire_prob, fire_prob_new, batch_update)
                 yv_cmd = self._partial_update_tensor(yv_cmd, yv_cmd_new, batch_update)
                 pv_cmd = self._partial_update_tensor(pv_cmd, pv_cmd_new, batch_update)
                 state = (
@@ -290,6 +296,8 @@ class DiffSimulator(nn.Module):
             )
 
             updated = armor_visible.any(dim=-1)
+            fire_prob = torch.where(updated, fire_prob, torch.zeros_like(fire_prob))
+            
             yaw = self._partial_update_tensor(yaw, yaw_new, updated)
             pitch = self._partial_update_tensor(pitch, pitch_new, updated)
             yaw_vel = self._partial_update_tensor(yaw_vel, yaw_vel_new, updated)
@@ -353,6 +361,7 @@ class DiffSimulator(nn.Module):
             logs["gimbal_pitch"].append(pitch)
             logs["yaw_vel"].append(yaw_vel)
             logs["pitch_vel"].append(pitch_vel)
+            logs["fire_prob"].append(fire_prob)
             logs["hit_pos"].append(hit_pos)
             logs["target_pos"].append(target_pos_final)
             logs["hit_dist"].append(hit_dist)

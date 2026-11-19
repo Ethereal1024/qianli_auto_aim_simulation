@@ -2,21 +2,27 @@ import numpy as np
 from mpl_toolkits.mplot3d import Axes3D
 
 from .view import View
+from .hit_visualize import HitVisualize
 
 
 class WorldView(View):
     def __init__(
         self,
         ax: Axes3D,
+        timeline: np.ndarray,
         armor_corners: np.ndarray,
         frames_metas: list[tuple[str, float]],
         frames_rots: list[np.ndarray],
         frames_trans: list[np.ndarray],
+        *,
+        hit_positions: np.ndarray | None = None,
+        t_fly: np.ndarray | None = None,
+        fire: np.ndarray | None = None,
         title: str = "World View",
         axis_colors: tuple[str, ...] = ("#d62728", "#2ca02c", "#1f77b4"),
         armor_colors: tuple[str, ...] = ("#d62728", "#1f77b4", "#2ca02c", "#9467bd"),
     ):
-        super().__init__(ax)
+        super().__init__(ax, timeline)
         self.n_armors = len(armor_colors)
         self.armor_corners = armor_corners
         self.axis_colors = axis_colors
@@ -39,18 +45,50 @@ class WorldView(View):
         self.ax.set_ylabel("Y left (m)")
         self.ax.set_zlabel("Z up (m)")
 
-    def update(self, index: int) -> None:
+        self.hit_positions = hit_positions
+        self.hit_scatter = ax.scatter(
+            [],
+            [],
+            [],  # type: ignore
+            marker="x",
+            s=100,
+            linewidths=2,
+            c="black",
+            depthshade=False,
+        )
+
+        self.hit_visualize = (
+            HitVisualize(self.hit_scatter, self.timeline + t_fly, fire)
+            if t_fly is not None and fire is not None
+            else None
+        )
+
+    def update(self, t: float) -> bool:
+        if t > self.timeline[-1]:
+            return False
+
+        if self.hit_positions is not None and self.hit_visualize is not None:
+            self.hit_visualize.update(
+                t,
+                [
+                    self.hit_positions[:, 0],
+                    self.hit_positions[:, 1],
+                    self.hit_positions[:, 2],
+                ],
+            )
+        index = self._time_query(t, self.timeline)
         armor_kps = self.armor_corners[index]
         for frame, trans, rots in zip(self.frames, self.frames_trans, self.frames_rots):
             self._update_frame(frame, trans[index], rots[index])
         for m in range(self.n_armors):
             loop = self._closed(armor_kps[m]).T
             self.armor_plates[m].set_data_3d(*loop)
+        return True
 
     def get_moving_items(self) -> list:
         return [
             a for lines, text, _ in self.frames for a in (*lines, text)
-        ] + self.armor_plates
+        ] + self.armor_plates + [self.hit_scatter]
 
     def _set_cube(self, points):
         lo, hi = points.reshape(-1, 3).min(0), points.reshape(-1, 3).max(0)
