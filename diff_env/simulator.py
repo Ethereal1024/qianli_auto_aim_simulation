@@ -7,7 +7,6 @@ import torch
 from torch import nn
 
 from tools.math import geometry as gmt
-from dataclasses import dataclass
 
 from .ballistic import Ballistic
 from .camera import Camera
@@ -265,7 +264,8 @@ class DiffSimulator(nn.Module):
                 )
                 armor_visible = armor_visible & keep
 
-            keypoints = keypoints + torch.randn_like(keypoints) * self.keypoints_noise
+            if self.keypoints_noise > 0:
+                keypoints = keypoints + torch.randn_like(keypoints) * self.keypoints_noise
             arange_batch = torch.arange(bsz, device=device)
 
             muzzle_prev = self._muzzle_world(yaw, pitch)  # [bsz, 3]

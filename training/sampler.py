@@ -44,14 +44,18 @@ class TargetSampler:
     ):
         self.cfg = config or SamplerConfig()
 
-    def _uniform(self, bsz, range, device, dtype):
+    def _uniform(self, bsz, range, device, dtype, generator=None):
         lo, hi = range
-        return torch.empty(bsz, device=device, dtype=dtype).uniform_(lo, hi)
+        return torch.empty(bsz, device=device, dtype=dtype).uniform_(
+            lo, hi, generator=generator
+        )
 
-    def sample(self, bsz: int, device, dtype) -> dict:
+    def sample(self, bsz: int, device, dtype, generator=None) -> dict:
         cfg = self.cfg
 
-        uniform_range = lambda x: self._uniform(bsz, x, device, dtype)
+        uniform_range = lambda x: self._uniform(
+            bsz, x, device, dtype, generator=generator
+        )
 
         p0 = torch.stack(
             [
@@ -85,11 +89,11 @@ class TargetSampler:
             radius_offset = torch.stack(
                 [radius_sp, radius_sp, radius_sp, radius_sp], dim=-1
             )
-            
+
         if cfg.height_offset_type == SampleOffsetType.VARIOUS:
-                    height_offset = torch.stack(
-                        [uniform_range(cfg.height_offset_range) for _ in range(4)], dim=-1
-                    )
+            height_offset = torch.stack(
+                [uniform_range(cfg.height_offset_range) for _ in range(4)], dim=-1
+            )
         elif cfg.height_offset_type == SampleOffsetType.BALANCE:
             height_sp1 = uniform_range(cfg.height_offset_range)
             height_sp2 = uniform_range(cfg.height_offset_range)
