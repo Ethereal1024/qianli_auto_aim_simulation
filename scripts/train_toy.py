@@ -3,7 +3,7 @@ import torch
 from torch import nn
 
 from diff_env.simulator import AutoAimPolicy, DiffSimulator
-from training.trainer import Trainer, TrainConfig
+from training.trainer import TrainConfig, Trainer
 
 
 class ToyMLPPolicy(AutoAimPolicy):

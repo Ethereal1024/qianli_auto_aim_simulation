@@ -22,7 +22,6 @@ class TrainConfig:
     grad_clip: float = 1.0
     log_interval: int = 50
     checkpoint_interval: int = 2000
-    checkpoint_dir: str = "checkpoints"
     seed: int = 0
     margin: float = 0.03
     temperature: float = 0.005
@@ -60,7 +59,7 @@ class Trainer:
         name = f"{self.cfg.run_tag}_{stamp}" if self.cfg.run_tag else stamp
 
         self.run_path = os.path.join(self.cfg.run_dir, name)
-        self.ckpt_dir = self.cfg.checkpoint_dir
+        self.ckpt_dir = os.path.join(self.run_path, "checkpoints")
 
         self.eval_gen = torch.Generator(device=str(self.device))
         self.eval_gen.manual_seed(self.cfg.eval_seed)
@@ -72,7 +71,7 @@ class Trainer:
         bsz = self.cfg.eval_bsz
         device, dtype = self.device, torch.float32
         params = dict(
-            self.sampler.sample(bsz, device, dtype), generator=generator, n_armors=4
+            self.sampler.sample(bsz, device, dtype, generator=generator), n_armors=4
         )
         t = self._sample_time(bsz, self.cfg.sql, device, dtype, generator=generator)
         yaw = torch.zeros(bsz, device=device, dtype=dtype)
@@ -81,7 +80,6 @@ class Trainer:
 
     def _init_log(self):
         os.makedirs(self.run_path, exist_ok=True)
-        self.ckpt_dir = os.path.join(self.run_path, "checkpoints")
         os.makedirs(self.ckpt_dir, exist_ok=True)
         with open(os.path.join(self.run_path, "config.json"), "w") as f:
             json.dump(
@@ -139,37 +137,35 @@ class Trainer:
         }
 
     @torch.no_grad()
-    def _hit_stats(self, logs: dict):
-        hit = logs["hit_dist"]
+    def _metrics(self, logs: dict) -> dict:
         update = logs["update"]
-        stats = {
-            "hit_dist": hit.mean().item(),
-            "valid_ratio": update.float().mean().item(),
+        seen = logs["hit_dist"][update]
+        if not seen.numel():
+            return {
+                "hit_p50": float("nan"),
+                "hit_rate": float("nan"),
+                "fire_on": float("nan"),
+            }
+        fire = logs["fire_prob"][update]
+        return {
+            "hit_p50": torch.quantile(seen, 0.5).item(),
+            "hit_rate": (seen <= self.cfg.margin).float().mean().item(),
+            "fire_on": (fire > 0.5).float().mean().item(),
         }
-        seen = hit[update]
-        if seen.numel():
-            q = torch.quantile(seen, torch.tensor([0.1, 0.5, 0.9], device=seen.device))
-            stats["hit_p10"] = q[0].item()
-            stats["hit_p50"] = q[1].item()
-            stats["hit_p90"] = q[2].item()
-            stats["hit_rate"] = (seen <= self.cfg.margin).float().mean().item()
-        else:
-            for key in ("hit_p10", "hit_p50", "hit_p90", "hit_rate"):
-                stats[key] = float("nan")
-        return stats
 
-    def evaluate(self, writer: SummaryWriter, step: int) -> dict:
+    def _record(self, writer: SummaryWriter, prefix: str, stats: dict, step: int):
+        for key, value in stats.items():
+            writer.add_scalar(f"{prefix}/{key}", value, step)
+
+    def evaluate(self) -> dict:
         self.sim.eval()
         t, params, yaw, pitch = self.eval_batch
         try:
             with torch.no_grad():
                 logs = self.sim(t, params, yaw, pitch)
-            stats = self._hit_stats(logs)
+            return self._metrics(logs)
         finally:
             self.sim.train()
-        for key, value in stats.items():
-            writer.add_scalar(f"eval/{key}", value, step)
-        return stats
 
     def train_step(self) -> dict:
         self.sim.train()
@@ -179,18 +175,14 @@ class Trainer:
         logs = self.sim(t, target_params, init_yaw, init_pitch)
 
         parts = self._compute_loss(logs)
-        loss = parts["loss"]
-        loss.backward()
+        parts["loss"].backward()
 
         params = [p for g in self.optimizer.param_groups for p in g["params"]]
-        grad_norm = torch.nn.utils.clip_grad_norm_(
-            params,
-            self.cfg.grad_clip,
-        )
+        grad_norm = torch.nn.utils.clip_grad_norm_(params, self.cfg.grad_clip)
         self.optimizer.step()
 
-        m = self._hit_stats(logs)
-        m["loss"] = loss.item()
+        m = self._metrics(logs)
+        m["loss"] = parts["loss"].item()
         m["hit_loss"] = parts["hit_loss"].item()
         m["fire_loss"] = parts["fire_loss"].item()
         m["grad_norm"] = float(grad_norm)
@@ -211,29 +203,33 @@ class Trainer:
 
     def train(self):
         writer = self._init_log()
+        last_time = time.perf_counter()
+        last_step = 0
         for step in range(1, self.cfg.num_steps + 1):
             m = self.train_step()
 
             if step % self.cfg.log_interval == 0:
-                for key, value in m.items():
-                    writer.add_scalar(f"train/{key}", value, step)
+                now = time.perf_counter()
+                m["steps_per_sec"] = (step - last_step) / max(now - last_time, 1e-9)
+                last_time, last_step = now, step
+                self._record(writer, "train", m, step)
                 writer.flush()
                 print(
-                    f"step {step:6d} | "
-                    f"loss {m['loss']:.4f} | "
-                    f"hit_dist {m['hit_dist']:.4f} | "
-                    f"valid {m['valid_ratio']:.1%} | "
-                    f"grad {m['grad_norm']:.3f}"
+                    f"step {step:6d} | loss {m['loss']:.4f} | "
+                    f"hit50 {m['hit_p50']:.3f}m | hit {m['hit_rate']:.1%} | "
+                    f"fire {m['fire_on']:.1%} | grad {m['grad_norm']:.3f} | "
+                    f"{m['steps_per_sec']:.0f} it/s"
                 )
 
             if step % self.cfg.eval_interval == 0:
-                e = self.evaluate(writer, step)
+                e = self.evaluate()
+                self._record(writer, "eval", e, step)
                 print(
-                    f"eval  {step:6d} | "
-                    f"hit50 {e['hit_p50']:.3f}m | "
-                    f"hit {e['hit_rate']:.1%} | "
-                    f"valid {e['valid_ratio']:.1%}"
+                    f"eval  {step:6d} | hit50 {e['hit_p50']:.3f}m | "
+                    f"hit {e['hit_rate']:.1%} | fire {e['fire_on']:.1%}"
                 )
+                last_time = time.perf_counter()
+                last_step = step
 
             if step % self.cfg.checkpoint_interval == 0:
                 self._save(step)
