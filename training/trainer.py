@@ -21,8 +21,8 @@ class TrainConfig:
     checkpoint_interval: int = 2000
     checkpoint_dir: str = "checkpoints"
     seed: int = 0
-    margin: float = 0.05
-    temperature: float = 0.02
+    margin: float = 0.03
+    temperature: float = 0.005
     fire_weight: float = 1.0
 
 

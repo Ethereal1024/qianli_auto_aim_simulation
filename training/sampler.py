@@ -19,8 +19,8 @@ class SamplerConfig:
     height_range: tuple[float, float] = (-1.0, 1.0)
 
     yaw_rate_range: tuple[float, float] = (-6.0, 6.0)
-    yaw_amp_range: tuple[float, float] = (0.0, 0.5)
-    yaw_freq_range: tuple[float, float] = (0.3, 2.0)
+    yaw_rate_amp_range: tuple[float, float] = (0.0, 0.5)
+    yaw_rate_freq_range: tuple[float, float] = (0.3, 2.0)
 
     pitch_amp_range: tuple[float, float] = (0.0, 0.1)
     pitch_freq_range: tuple[float, float] = (0.3, 2.0)
@@ -105,8 +105,8 @@ class TargetSampler:
         return {
             "p0": p0,
             "yaw_rate": uniform_range(cfg.yaw_rate_range),
-            "yaw_amp": uniform_range(cfg.yaw_amp_range),
-            "yaw_freq": uniform_range(cfg.yaw_freq_range),
+            "yaw_rate_amp": uniform_range(cfg.yaw_rate_amp_range),
+            "yaw_rate_freq": uniform_range(cfg.yaw_rate_freq_range),
             "pitch_amp": uniform_range(cfg.pitch_amp_range),
             "pitch_freq": uniform_range(cfg.pitch_freq_range),
             "sinus_amp": sinus_amp,
