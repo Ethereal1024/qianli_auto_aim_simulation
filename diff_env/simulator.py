@@ -59,8 +59,8 @@ class SimpleProportionalPolicy(AutoAimPolicy):
         state=None,
         armor_mask: torch.Tensor | None = None,
     ):
-        plate_cx = keypoints[..., 0::2].mean(-1, keepdim=True)
-        plate_cy = keypoints[..., 1::2].mean(-1, keepdim=True)
+        plate_cx = keypoints[..., 0::2].mean(-1)
+        plate_cy = keypoints[..., 1::2].mean(-1)
 
         if plate_cx.dim() > 1:
             if armor_mask is None:
@@ -97,6 +97,7 @@ class DiffSimulator(nn.Module):
         muzzle_len: float = 0.15,
         armor_width: float = 0.12,
         armor_height: float = 0.06,
+        bullet_radius: float = 0.0085,
         occlusion_factor: float = 0.0,
         keypoints_noise: float = 0.0,
     ):
@@ -112,6 +113,9 @@ class DiffSimulator(nn.Module):
         self.bullet_speed = bullet_speed
         self.muzzle_len = muzzle_len
         self.occlusion_factor = occlusion_factor
+        self.armor_height = armor_height
+        self.armor_width = armor_width
+        self.bullet_radius = bullet_radius
         self.armor_size = armor_height * armor_width
         self.keypoints_noise = keypoints_noise
         self.v_nominal = v_nominal

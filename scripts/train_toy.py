@@ -14,6 +14,10 @@ class ToyMLPPolicy(AutoAimPolicy):
         self.net = nn.Sequential(
             nn.Linear(n_armors * 9 + 3, 64),
             nn.ReLU(),
+            nn.Linear(64, 128),
+            nn.ReLU(),
+            nn.Linear(128, 64),
+            nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
             nn.Linear(64, 3),

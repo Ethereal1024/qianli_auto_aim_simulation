@@ -112,6 +112,6 @@ class TargetSampler:
             "sinus_amp": sinus_amp,
             "sinus_freq": sinus_freq,
             "radius": cfg.base_radius,
-            "radius_offset": radius_offset,
-            "height_offset": height_offset,
+            "armor_radius_offsets": radius_offset,
+            "armor_height_offsets": height_offset,
         }
