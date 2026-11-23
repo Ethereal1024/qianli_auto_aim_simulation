@@ -75,7 +75,7 @@ class Trainer:
         mask = logs["update"].float()
         n_valid = mask.sum()
 
-        hit_loss = (logs["hit_dist"] * mask).sum() / n_valid.clamp(min=1.0)
+        hit_loss = logs["hit_dist"].mean()
 
         fire_target = torch.sigmoid(
             (self.cfg.margin - logs["hit_dist"]) / self.cfg.temperature
@@ -108,7 +108,7 @@ class Trainer:
         self.optimizer.step()
 
         with torch.no_grad():
-            hit_mean = ((logs["hit_dist"] * mask).sum() / n_valid.clamp(min=1.0)).item()
+            hit_mean = logs["hit_dist"].mean().item()
             valid_ratio = (n_valid / mask.numel()).item()
 
         return {

@@ -9,14 +9,14 @@ from training.trainer import Trainer, TrainConfig
 class ToyMLPPolicy(AutoAimPolicy):
     """最小可训练 policy，验证 trainer 流程。"""
 
-    def __init__(self):
+    def __init__(self, n_armors: int = 4):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Linear(8 + 2 + 1, 64),
+            nn.Linear(n_armors * 9 + 3, 64),
             nn.ReLU(),
             nn.Linear(64, 64),
             nn.ReLU(),
-            nn.Linear(64, 2),
+            nn.Linear(64, 3),
         )
 
     def init_state(self, bsz, device, dtype):
@@ -24,18 +24,27 @@ class ToyMLPPolicy(AutoAimPolicy):
 
     def forward(
         self, keypoints, yaw_vel, pitch_vel, dt,
-        cam_offset, muzzle_len, bullet_speed, state=None,
+        cam_offset, muzzle_len, bullet_speed, state=None, armor_mask=None
     ):
-        x = torch.cat([
-            keypoints,
-            yaw_vel.unsqueeze(-1),
-            pitch_vel.unsqueeze(-1),
-            dt.unsqueeze(-1),
-        ], dim=-1)
-        raw = self.net(x)
+        if keypoints.dim() == 3:
+            mask = armor_mask
+            if mask is None:
+                mask = torch.ones(
+                    keypoints.shape[:2], dtype=torch.bool, device=keypoints.device
+                )
+            kp = (keypoints * mask.unsqueeze(-1)).flatten(1)
+            extra = mask.to(keypoints.dtype)
+        else:
+            kp, extra = keypoints, None
+
+        x = [kp, yaw_vel.unsqueeze(-1), pitch_vel.unsqueeze(-1), dt.unsqueeze(-1)]
+        if extra is not None:
+            x.insert(1, extra)
+        raw = self.net(torch.cat(x, dim=-1))
         yaw_rate_cmd = torch.tanh(raw[..., 0])
         pitch_rate_cmd = torch.tanh(raw[..., 1])
-        return yaw_rate_cmd, pitch_rate_cmd, None
+        fire_prob = torch.sigmoid(raw[..., 2])
+        return None, fire_prob, yaw_rate_cmd, pitch_rate_cmd
 
 
 if __name__ == "__main__":
