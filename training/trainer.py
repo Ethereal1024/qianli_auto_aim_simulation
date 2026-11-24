@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict, dataclass
 
 import torch
+import torch.nn.functional as F
 from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
@@ -68,7 +69,7 @@ class Trainer:
         self.eval_batch = self._sample_eval(self.eval_gen)
 
         torch.manual_seed(self.cfg.seed)
-        
+
         self.start_step = 0
         if resume:
             ckpt = torch.load(resume, map_location=self.device)
@@ -137,10 +138,8 @@ class Trainer:
         fire_target = torch.sigmoid(
             (self.cfg.margin - logs["hit_dist"]) / self.cfg.temperature
         ).detach()
-        fire_prob = logs["fire_prob"].clamp(1e-6, 1 - 1e-6)
-        fire_loss = -(
-            fire_target * torch.log(fire_prob)
-            + (1 - fire_target) * torch.log(1 - fire_prob)
+        fire_loss = F.binary_cross_entropy_with_logits(
+            logs["fire_logit"], fire_target, reduction="none"
         )
         fire_loss = (fire_loss * mask).sum() / n_valid.clamp(min=1.0)
 
@@ -159,13 +158,15 @@ class Trainer:
             return {
                 "hit_p50": float("nan"),
                 "hit_rate": float("nan"),
-                "fire_on": float("nan"),
+                "fire_mean": float("nan"),
             }
         fire = logs["fire_prob"][update]
+        hit_rate = (seen <= self.cfg.margin).float().mean().item()
+        fire_mean = fire.mean().item()
         return {
             "hit_p50": torch.quantile(seen, 0.5).item(),
-            "hit_rate": (seen <= self.cfg.margin).float().mean().item(),
-            "fire_on": (fire > 0.5).float().mean().item(),
+            "hit_rate": hit_rate,
+            "fire_mean": fire_mean,
         }
 
     def _record(self, writer: SummaryWriter, prefix: str, stats: dict, step: int):
@@ -242,7 +243,7 @@ class Trainer:
                     "loss": f"{m['loss']:.4f}",
                     "hit50": f"{m['hit_p50']:.3f}m",
                     "hit": f"{m['hit_rate']:.1%}",
-                    "fire": f"{m['fire_on']:.1%}",
+                    "fire": f"{m['fire_mean']:.3f}",
                     "grad": f"{m['grad_norm']:.3f}",
                 },
                 refresh=False,
@@ -257,7 +258,8 @@ class Trainer:
                 tqdm.write(
                     f"step {step:6d} | loss {m['loss']:.4f} | "
                     f"hit50 {m['hit_p50']:.3f}m | hit {m['hit_rate']:.1%} | "
-                    f"fire {m['fire_on']:.1%} | grad {m['grad_norm']:.3f} | "
+                    f"fire {m['fire_mean']:.3f} | "
+                    f"grad {m['grad_norm']:.3f} | "
                     f"{m['steps_per_sec']:.0f} it/s"
                 )
 
@@ -266,7 +268,7 @@ class Trainer:
                 self._record(writer, "eval", e, step)
                 tqdm.write(
                     f"eval  {step:6d} | hit50 {e['hit_p50']:.3f}m | "
-                    f"hit {e['hit_rate']:.1%} | fire {e['fire_on']:.1%}"
+                    f"hit {e['hit_rate']:.1%} | fire {e['fire_mean']:.3f}   "
                 )
                 last_time = time.perf_counter()
                 last_step = step

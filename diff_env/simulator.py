@@ -75,11 +75,11 @@ class SimpleProportionalPolicy(AutoAimPolicy):
         else:
             cx, cy, d2_min = plate_cx, plate_cy, plate_cx**2 + plate_cy**2
 
-        fire_prob = torch.sigmoid(-d2_min / 0.1 + 3).reshape(-1)
+        fire_logit = (-d2_min / 0.1 + 3).reshape(-1)
 
         yaw_vel_cmd = torch.tanh(-self.gain * cx).squeeze(-1)
         pitch_vel_cmd = torch.tanh(-self.gain * cy).squeeze(-1)
-        return state, fire_prob, yaw_vel_cmd, pitch_vel_cmd
+        return state, fire_logit, yaw_vel_cmd, pitch_vel_cmd
 
 
 class DiffSimulator(nn.Module):
@@ -212,6 +212,7 @@ class DiffSimulator(nn.Module):
             "yaw_vel": [],
             "pitch_vel": [],
             "fire_prob": [],
+            "fire_logit": [],
             "hit_pos": [],
             "target_pos": [],
             "hit_dist": [],
@@ -281,7 +282,7 @@ class DiffSimulator(nn.Module):
             )  # ? make sure we have at list one visible armor?
 
             kp_all = keypoints.reshape(bsz, n_armors, -1)  # [bsz, n_armors, 8]
-            state_new, fire_prob, yv_cmd, pv_cmd = self.policy(
+            state_new, fire_logit, yv_cmd, pv_cmd = self.policy(
                 keypoints=kp_all,
                 armor_mask=armor_visible,
                 yaw_vel=yaw_vel,
@@ -293,7 +294,7 @@ class DiffSimulator(nn.Module):
                 muzzle_len=self.muzzle_len,
             )
             state = state_new
-            fire_prob = torch.where(updated, fire_prob, torch.zeros_like(fire_prob))
+            fire_prob = torch.where(updated, torch.sigmoid(fire_logit), torch.zeros_like(fire_logit))
 
             yaw, pitch, yaw_vel, pitch_vel = self.gimbal(
                 yaw,
@@ -342,6 +343,7 @@ class DiffSimulator(nn.Module):
             logs["yaw_vel"].append(yaw_vel)
             logs["pitch_vel"].append(pitch_vel)
             logs["fire_prob"].append(fire_prob)
+            logs["fire_logit"].append(fire_logit)
             logs["hit_pos"].append(hit_pos)
             logs["target_pos"].append(target_pos_final)
             logs["hit_dist"].append(hit_dist)

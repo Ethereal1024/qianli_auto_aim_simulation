@@ -45,5 +45,5 @@ class ToyMLPPolicy(AutoAimPolicy):
         raw = self.net(torch.cat(x, dim=-1))
         yaw_rate_cmd = torch.tanh(raw[..., 0])
         pitch_rate_cmd = torch.tanh(raw[..., 1])
-        fire_prob = torch.sigmoid(raw[..., 2])
-        return None, fire_prob, yaw_rate_cmd, pitch_rate_cmd
+        fire_logit = torch.sigmoid(raw[..., 2])
+        return None, fire_logit, yaw_rate_cmd, pitch_rate_cmd
