@@ -8,5 +8,6 @@ def main():
     cfg = TrainConfig(num_steps=2000, log_interval=50, run_tag="toy")
     Trainer(sim, config=cfg).train()
 
+
 if __name__ == "__main__":
     main()

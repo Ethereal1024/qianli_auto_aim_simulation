@@ -7,6 +7,7 @@ from dataclasses import asdict, dataclass
 
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from diff_env.simulator import DiffSimulator
 
@@ -221,14 +222,31 @@ class Trainer:
             },
             path,
         )
-        print(f"saved -> {path}")
+        tqdm.write(f"saved -> {path}")
 
     def train(self):
         writer = self._init_log()
         last_time = time.perf_counter()
         last_step = self.start_step
-        for step in range(self.start_step + 1, self.cfg.num_steps + 1):
+        bar = tqdm(
+            range(self.start_step + 1, self.cfg.num_steps + 1),
+            total=self.cfg.num_steps,
+            initial=self.start_step,
+            desc=self.cfg.run_tag or "train",
+            dynamic_ncols=True,
+        )
+        for step in bar:
             m = self.train_step()
+            bar.set_postfix(
+                {
+                    "loss": f"{m['loss']:.4f}",
+                    "hit50": f"{m['hit_p50']:.3f}m",
+                    "hit": f"{m['hit_rate']:.1%}",
+                    "fire": f"{m['fire_on']:.1%}",
+                    "grad": f"{m['grad_norm']:.3f}",
+                },
+                refresh=False,
+            )
 
             if step % self.cfg.log_interval == 0:
                 now = time.perf_counter()
@@ -236,7 +254,7 @@ class Trainer:
                 last_time, last_step = now, step
                 self._record(writer, "train", m, step)
                 writer.flush()
-                print(
+                tqdm.write(
                     f"step {step:6d} | loss {m['loss']:.4f} | "
                     f"hit50 {m['hit_p50']:.3f}m | hit {m['hit_rate']:.1%} | "
                     f"fire {m['fire_on']:.1%} | grad {m['grad_norm']:.3f} | "
@@ -246,7 +264,7 @@ class Trainer:
             if step % self.cfg.eval_interval == 0:
                 e = self.evaluate()
                 self._record(writer, "eval", e, step)
-                print(
+                tqdm.write(
                     f"eval  {step:6d} | hit50 {e['hit_p50']:.3f}m | "
                     f"hit {e['hit_rate']:.1%} | fire {e['fire_on']:.1%}"
                 )

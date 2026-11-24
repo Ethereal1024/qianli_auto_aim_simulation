@@ -1246,7 +1246,7 @@ wheels = [
 [[package]]
 name = "qianli-auto-aim-simulation"
 version = "0.1.0"
-source = { editable = "." }
+source = { virtual = "." }
 dependencies = [
     { name = "matplotlib" },
     { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.mirrors.ustc.edu.cn/simple/" }, marker = "python_full_version < '3.12'" },
