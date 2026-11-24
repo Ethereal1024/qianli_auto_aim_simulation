@@ -41,6 +41,7 @@ class Trainer:
         config: TrainConfig | None = None,
         sampler_config: SamplerConfig | None = None,
         device: torch.device | None = None,
+        resume: str | None = None,
     ):
         self.sim = simulator
         self.cfg = config or TrainConfig()
@@ -66,6 +67,19 @@ class Trainer:
         self.eval_batch = self._sample_eval(self.eval_gen)
 
         torch.manual_seed(self.cfg.seed)
+        
+        self.start_step = 0
+        if resume:
+            ckpt = torch.load(resume, map_location=self.device)
+            self.sim.load_state_dict(ckpt["model"])
+            self.optimizer.load_state_dict(ckpt["optimizer"])
+            torch.set_rng_state(ckpt["rng"])
+            if ckpt["cuda_rng"] is not None:
+                torch.cuda.set_rng_state(ckpt["cuda_rng"])
+            self.run_path = os.path.dirname(os.path.dirname(os.path.abspath(resume)))
+            self.ckpt_dir = os.path.join(self.run_path, "checkpoints")
+            self.start_step = int(ckpt["step"])
+            print(f"resume <- {resume} at step {self.start_step}")
 
     def _sample_eval(self, generator):
         bsz = self.cfg.eval_bsz
@@ -191,11 +205,19 @@ class Trainer:
     def _save(self, step):
         os.makedirs(self.ckpt_dir, exist_ok=True)
         path = os.path.join(self.ckpt_dir, f"step_{step}.pt")
+        cuda_rng = (
+            torch.cuda.get_rng_state_all() if self.device.type == "cuda" else None
+        )
         torch.save(
             {
                 "step": step,
                 "model": self.sim.state_dict(),
                 "optimizer": self.optimizer.state_dict(),
+                "config": json.dumps(
+                    {"train": asdict(self.cfg), "sampler": asdict(self.sampler.cfg)}
+                ),
+                "rng": torch.get_rng_state(),
+                "cuda_rng": cuda_rng,
             },
             path,
         )
@@ -204,8 +226,8 @@ class Trainer:
     def train(self):
         writer = self._init_log()
         last_time = time.perf_counter()
-        last_step = 0
-        for step in range(1, self.cfg.num_steps + 1):
+        last_step = self.start_step
+        for step in range(self.start_step + 1, self.cfg.num_steps + 1):
             m = self.train_step()
 
             if step % self.cfg.log_interval == 0:
